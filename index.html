@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>&#25351;&#28857;&#29579;</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="rail" aria-label="Workspace">
+        <div class="brand">
+          <span class="mark">P</span>
+          <div>
+            <strong id="brandName">&#25351;&#28857;&#29579;</strong>
+            <span id="brandSub">&#25209;&#27880;&#24037;&#20316;&#21488;</span>
+          </div>
+        </div>
+
+        <label class="dropzone" id="dropzone">
+          <input id="fileInput" type="file" accept="application/pdf,image/png,image/jpeg" />
+          <span class="drop-icon" aria-hidden="true">
+            <i data-lucide="upload-cloud"></i>
+          </span>
+          <strong id="dropTitle">&#25302;&#20837;&#25991;&#20214;</strong>
+          <small>PDF, PNG, JPG</small>
+        </label>
+
+        <section class="panel">
+          <div class="panel-title" id="panelTitle">&#25991;&#20214;</div>
+          <div class="file-card active">
+            <span class="file-type">PDF</span>
+            <div>
+              <strong id="fileName">homepage-review.pdf</strong>
+              <span id="fileMeta">3 pages &middot; 12 comments</span>
+            </div>
+          </div>
+          <div class="file-card">
+            <span class="file-type image">JPG</span>
+            <div>
+              <strong>mobile-flow.jpg</strong>
+              <span>2 comments</span>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <div class="resize-handle resize-handle-left" id="leftResizeHandle" role="separator" aria-orientation="vertical" aria-label="&#35843;&#25972;&#24038;&#26639;&#23485;&#24230;">
+        <button class="collapse-toggle collapse-toggle-left" id="leftCollapseBtn" title="&#25240;&#21472;&#24038;&#26639;" aria-label="&#25240;&#21472;&#24038;&#26639;">
+          <i data-lucide="panel-left-close"></i>
+        </button>
+      </div>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="document-title">
+            <span class="status-dot"></span>
+            <div>
+              <strong id="docTitle">homepage-review.pdf</strong>
+              <span id="docSubtitle">&#22312;&#32447;&#25209;&#27880; &middot; &#22810;&#39029;&#30011;&#24067;</span>
+            </div>
+          </div>
+
+          <div class="tools" role="toolbar" aria-label="Annotation tools">
+            <button class="tool active" data-tool="select" title="&#36873;&#25321;" aria-label="&#36873;&#25321;">
+              <i data-lucide="mouse-pointer-2"></i>
+            </button>
+            <button class="tool" data-tool="mark" title="&#26631;&#27880;" aria-label="&#26631;&#27880;">
+              <i data-lucide="message-square-text"></i>
+            </button>
+          </div>
+
+          <div class="actions">
+            <button class="ghost" id="languageBtn" title="English" aria-label="Switch language">
+              <span id="languageText">EN</span>
+            </button>
+            <button class="ghost" id="themeBtn" title="&#20999;&#25442;&#20027;&#39064;" aria-label="&#20999;&#25442;&#20027;&#39064;">
+              <i data-lucide="sun"></i>
+            </button>
+            <span class="zoom-readout" id="zoomReadout">100%</span>
+            <button class="ghost" id="undoBtn" title="&#25764;&#38144;" aria-label="&#25764;&#38144;">
+              <i data-lucide="undo-2"></i>
+            </button>
+            <button class="primary" id="shareBtn">
+              <i data-lucide="share-2"></i>
+              <span id="shareText">&#20998;&#20139;</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="canvas-viewport" id="canvasViewport">
+          <div class="canvas-surface" id="canvasSurface">
+            <div class="page-stack" id="pageStack">
+              <div class="doc-page placeholder-page" data-page-id="intro">
+                <div class="placeholder" id="placeholder">
+                  <span id="placeholderProduct">&#25351;&#28857;&#29579;</span>
+                  <h1 id="placeholderTitle">&#22810;&#39029; PDF &#19968;&#27425;&#23637;&#24320;</h1>
+                  <p id="placeholderCopy">&#23548;&#20837; PDF &#21518;&#65292;&#39029;&#38754;&#20250;&#22312;&#26080;&#38480;&#30011;&#24067;&#19978;&#32437;&#21521;&#25490;&#24067;&#12290;&#25353;&#20303; Ctrl &#24182;&#28378;&#21160;&#40736;&#26631;&#21487;&#20197;&#32553;&#25918;&#30011;&#24067;&#12290;</p>
+                </div>
+                <svg class="overlay" aria-label="Annotations"></svg>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div class="resize-handle resize-handle-right" id="rightResizeHandle" role="separator" aria-orientation="vertical" aria-label="&#35843;&#25972;&#21491;&#26639;&#23485;&#24230;">
+        <button class="collapse-toggle collapse-toggle-right" id="rightCollapseBtn" title="&#25240;&#21472;&#21491;&#26639;" aria-label="&#25240;&#21472;&#21491;&#26639;">
+          <i data-lucide="panel-right-close"></i>
+        </button>
+      </div>
+
+      <aside class="comments" aria-label="Comments">
+        <div class="comments-head">
+          <div>
+            <span id="commentsTitle">&#25209;&#27880;</span>
+            <strong id="commentCount">0</strong>
+          </div>
+          <button class="ghost compact" id="clearBtn" title="&#28165;&#31354;" aria-label="&#28165;&#31354;">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>
+
+        <div class="comment-list" id="commentList"></div>
+      </aside>
+    </div>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="./script.js?v=20260703-annotation-menu" type="module"></script>
+  </body>
+</html>
