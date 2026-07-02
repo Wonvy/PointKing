@@ -39,6 +39,7 @@ const commentsTitle = document.querySelector("#commentsTitle");
 const canvasMenu = createCanvasMenu();
 const annotationNotice = createAnnotationNotice();
 const magnifierLens = createMagnifierLens();
+const confirmDialog = createConfirmDialog();
 let commentImagePreview;
 
 const translations = {
@@ -48,8 +49,8 @@ const translations = {
     dropTitle: "\u62d6\u5165\u6587\u4ef6",
     panelTitle: "\u6587\u4ef6",
     docSubtitle: "\u5728\u7ebf\u6279\u6ce8 \u00b7 \u591a\u9875\u753b\u5e03",
-    share: "\u5206\u4eab",
-    copied: "\u5df2\u590d\u5236",
+    share: "\u5bfc\u51fa",
+    copied: "\u5bfc\u51fa\u529f\u80fd\u5f85\u6dfb\u52a0",
     ready: "\u5df2\u5c31\u7eea",
     comments: "\u6279\u6ce8",
     placeholderProduct: "\u6307\u70b9\u738b",
@@ -71,6 +72,10 @@ const translations = {
     deleteFallback: "\u5220\u9664\u6b64\u533a\u57df\u5185\u5bb9",
     searchAnnotations: "\u641c\u7d22\u6279\u6ce8",
     filterAll: "\u5168\u90e8",
+    confirmClearTitle: "\u5220\u9664\u5168\u90e8\u6279\u6ce8\uff1f",
+    confirmClearBody: "\u6b64\u64cd\u4f5c\u4f1a\u5220\u9664\u53f3\u4fa7\u5217\u8868\u548c\u753b\u5e03\u4e0a\u7684\u6240\u6709\u6279\u6ce8\uff0c\u65e0\u6cd5\u64a4\u56de\u3002",
+    cancel: "\u53d6\u6d88",
+    confirmDelete: "\u5220\u9664",
     unsavedAnnotation: "\u8bf7\u5148\u4fdd\u5b58\u5f53\u524d\u6279\u6ce8",
     editAnnotation: "\u7f16\u8f91",
     deleteAnnotation: "\u5220\u9664",
@@ -90,8 +95,8 @@ const translations = {
     dropTitle: "Drop file",
     panelTitle: "Files",
     docSubtitle: "Online review · Multi-page canvas",
-    share: "Share",
-    copied: "Copied",
+    share: "Export",
+    copied: "Export coming soon",
     ready: "Ready",
     comments: "Comments",
     placeholderProduct: "PointKing",
@@ -113,6 +118,10 @@ const translations = {
     deleteFallback: "Remove this selected content",
     searchAnnotations: "Search annotations",
     filterAll: "All",
+    confirmClearTitle: "Delete all annotations?",
+    confirmClearBody: "This removes every annotation from the list and canvas. This action cannot be undone.",
+    cancel: "Cancel",
+    confirmDelete: "Delete",
     unsavedAnnotation: "Save the current annotation first",
     editAnnotation: "Edit",
     deleteAnnotation: "Delete",
@@ -152,6 +161,7 @@ let currentTheme = localStorage.getItem(themeStorageKey) || "dark";
 let currentDocumentKey = defaultDocumentKey;
 let annotations = [];
 let dragStart = null;
+let dragEndPoint = null;
 let dragPreview = null;
 let activePointer = null;
 let pan = { x: 0, y: 0 };
@@ -228,7 +238,12 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") hideCanvasMenu();
+  if (handleDragKeyboardNudge(event)) return;
+
+  if (event.key === "Escape") {
+    hideCanvasMenu();
+    closeConfirmDialog();
+  }
 });
 
 dropzone.addEventListener("dragover", (event) => {
@@ -282,11 +297,21 @@ canvasViewport.addEventListener("pointerdown", (event) => {
   startMagnifierHold(event, page);
 
   if (hasOpenAnnotationEditor()) {
+    if (currentTool === "mark" && moveEmptyDraftAnnotationToPointer(event, page)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dragStart = null;
+      dragEndPoint = null;
+      dragPreview = null;
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     showUnsavedAnnotationNotice();
     focusCurrentAnnotationEditor();
     dragStart = null;
+    dragEndPoint = null;
     dragPreview = null;
     return;
   }
@@ -294,10 +319,12 @@ canvasViewport.addEventListener("pointerdown", (event) => {
   if (currentTool === "select") {
     removeEmptyDraftAnnotations();
     dragStart = null;
+    dragEndPoint = null;
     return;
   }
 
   dragStart = getPagePoint(event, page);
+  dragEndPoint = dragStart;
 
   if (currentTool === "mark") {
     removeEmptyDraftAnnotations();
@@ -315,6 +342,8 @@ canvasViewport.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  dragStart = null;
+  dragEndPoint = null;
 });
 
 canvasViewport.addEventListener("pointermove", (event) => {
@@ -351,6 +380,7 @@ canvasViewport.addEventListener("pointerup", (event) => {
   const page = event.target.closest(".doc-page");
   if (!dragStart || currentTool !== "mark") {
     dragStart = null;
+    dragEndPoint = null;
     dragPreview = null;
     return;
   }
@@ -358,11 +388,12 @@ canvasViewport.addEventListener("pointerup", (event) => {
   const targetPage = page || pageStack.querySelector(`.doc-page[data-page-id="${dragPreview?.pageId}"]`);
   if (!targetPage || !dragPreview) {
     dragStart = null;
+    dragEndPoint = null;
     dragPreview = null;
     return;
   }
 
-  const end = getPagePoint(event, targetPage);
+  const end = dragEndPoint || getPagePoint(event, targetPage);
   const distance = Math.hypot(end.x - dragStart.x, end.y - dragStart.y);
   if (distance > 2) {
     dragPreview.preview = false;
@@ -379,11 +410,15 @@ canvasViewport.addEventListener("pointerup", (event) => {
     focusAnnotationInput(dragPreview.id);
   }
   dragStart = null;
+  dragEndPoint = null;
   dragPreview = null;
 });
 
 canvasViewport.addEventListener("pointercancel", (event) => {
   if (event.pointerId === magnifierPointerId) stopMagnifier();
+  dragStart = null;
+  dragEndPoint = null;
+  dragPreview = null;
   endPan(event);
 });
 
@@ -394,9 +429,16 @@ undoBtn.addEventListener("click", () => {
 });
 
 clearBtn.addEventListener("click", () => {
-  annotations = [];
-  saveAnnotations();
-  renderAnnotations();
+  showConfirmDialog({
+    title: t("confirmClearTitle"),
+    body: t("confirmClearBody"),
+    confirmLabel: t("confirmDelete"),
+    onConfirm: () => {
+      annotations = [];
+      saveAnnotations();
+      renderAnnotations();
+    },
+  });
 });
 
 commentSearch.addEventListener("input", () => {
@@ -429,11 +471,12 @@ commentList.addEventListener("mouseout", (event) => {
 });
 
 shareBtn.addEventListener("click", async () => {
+  setShareText(currentLanguage === "zh" ? "\u751f\u6210\u4e2d" : "Exporting");
   try {
-    await navigator.clipboard.writeText("https://pointking.app/review/demo");
-    setShareText(t("copied"));
+    await exportStaticBoard();
+    setShareText(currentLanguage === "zh" ? "\u5df2\u5bfc\u51fa" : "Exported");
   } catch {
-    setShareText(t("ready"));
+    setShareText(currentLanguage === "zh" ? "\u5bfc\u51fa\u5931\u8d25" : "Export failed");
   }
   setTimeout(() => setShareText(t("share")), 1400);
 });
@@ -600,6 +643,63 @@ function createMagnifierLens() {
   return lens;
 }
 
+function createConfirmDialog() {
+  const overlay = document.createElement("div");
+  overlay.className = "confirm-modal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+
+  const dialog = document.createElement("div");
+  dialog.className = "confirm-dialog";
+
+  const title = document.createElement("strong");
+  title.className = "confirm-title";
+
+  const body = document.createElement("p");
+  body.className = "confirm-body";
+
+  const actions = document.createElement("div");
+  actions.className = "confirm-actions";
+
+  const cancel = document.createElement("button");
+  cancel.className = "confirm-cancel";
+  cancel.type = "button";
+
+  const confirm = document.createElement("button");
+  confirm.className = "confirm-delete";
+  confirm.type = "button";
+
+  actions.append(cancel, confirm);
+  dialog.append(title, body, actions);
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  overlay.addEventListener("pointerdown", (event) => {
+    if (event.target === overlay) closeConfirmDialog();
+  });
+  cancel.addEventListener("click", closeConfirmDialog);
+
+  return { overlay, title, body, cancel, confirm };
+}
+
+function showConfirmDialog({ title, body, confirmLabel, onConfirm }) {
+  confirmDialog.title.textContent = title;
+  confirmDialog.body.textContent = body;
+  confirmDialog.cancel.textContent = t("cancel");
+  confirmDialog.confirm.textContent = confirmLabel;
+  confirmDialog.confirm.onclick = () => {
+    closeConfirmDialog();
+    onConfirm?.();
+  };
+  confirmDialog.overlay.classList.add("open");
+  confirmDialog.confirm.focus();
+}
+
+function closeConfirmDialog() {
+  confirmDialog.overlay.classList.remove("open");
+  confirmDialog.confirm.onclick = null;
+}
+
 function hasOpenAnnotationEditor() {
   return !!pageStack.querySelector(".annotation-editor");
 }
@@ -612,6 +712,38 @@ function getCurrentEditorAnnotationId() {
 function focusCurrentAnnotationEditor() {
   const annotationId = getCurrentEditorAnnotationId();
   if (annotationId) focusAnnotationInput(annotationId);
+}
+
+function moveEmptyDraftAnnotationToPointer(event, page) {
+  const annotation = annotations.find((item) => item.draft);
+  if (!annotation || !isDraftEditorEmpty(annotation.id)) return false;
+
+  const point = getPagePoint(event, page);
+  annotation.pageId = page.dataset.pageId;
+  annotation.preview = false;
+
+  if (annotation.type === "mark" && Number.isFinite(annotation.width) && Number.isFinite(annotation.height)) {
+    annotation.width = Math.max(4, annotation.width || 18);
+    annotation.height = Math.max(3, annotation.height || 12);
+    annotation.x = clamp(point.x - annotation.width / 2, 0, 100 - annotation.width);
+    annotation.y = clamp(point.y - annotation.height / 2, 0, 100 - annotation.height);
+  } else {
+    annotation.type = "text";
+    delete annotation.width;
+    delete annotation.height;
+    annotation.x = clamp(point.x, 0, 100);
+    annotation.y = clamp(point.y, 0, 100);
+  }
+
+  renderAnnotations();
+  focusAnnotationInput(annotation.id);
+  return true;
+}
+
+function isDraftEditorEmpty(annotationId) {
+  const input = pageStack.querySelector(`.annotation-editor[data-annotation-id="${annotationId}"] textarea`);
+  const annotation = annotations.find((item) => item.id === annotationId);
+  return !input?.value.trim() && !hasReferenceImages(annotation);
 }
 
 function showUnsavedAnnotationNotice() {
@@ -1044,10 +1176,19 @@ function drawMark(layer, annotation) {
 
 function updateDragPreview(event, page) {
   const end = getPagePoint(event, page);
-  const x = Math.min(dragStart.x, end.x);
-  const y = Math.min(dragStart.y, end.y);
-  const width = Math.abs(end.x - dragStart.x);
-  const height = Math.abs(end.y - dragStart.y);
+  updateDragPreviewFromPoint(end);
+}
+
+function updateDragPreviewFromPoint(end) {
+  if (!dragStart || !dragPreview) return;
+  dragEndPoint = {
+    x: clamp(end.x, 0, 100),
+    y: clamp(end.y, 0, 100),
+  };
+  const x = Math.min(dragStart.x, dragEndPoint.x);
+  const y = Math.min(dragStart.y, dragEndPoint.y);
+  const width = Math.abs(dragEndPoint.x - dragStart.x);
+  const height = Math.abs(dragEndPoint.y - dragStart.y);
 
   dragPreview.x = x;
   dragPreview.y = y;
@@ -1061,6 +1202,47 @@ function updateDragPreview(event, page) {
   box.style.top = `${y}%`;
   box.style.width = `${width}%`;
   box.style.height = `${height}%`;
+}
+
+function handleDragKeyboardNudge(event) {
+  if (!magnifierEnabled || !dragPreview || !dragStart || currentTool !== "mark") return false;
+
+  const deltas = {
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+  };
+  const delta = deltas[event.key];
+  if (!delta) return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const step = event.shiftKey ? 1 : event.altKey ? 0.1 : 0.25;
+  const current = dragEndPoint || dragStart;
+  const next = {
+    x: clamp(current.x + delta[0] * step, 0, 100),
+    y: clamp(current.y + delta[1] * step, 0, 100),
+  };
+  updateDragPreviewFromPoint(next);
+  updateMagnifierForPagePoint(next);
+  return true;
+}
+
+function updateMagnifierForPagePoint(point) {
+  if (!magnifierActive || !dragPreview) return;
+
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${dragPreview.pageId}"]`);
+  if (!page) return;
+
+  const rect = page.getBoundingClientRect();
+  const clientPoint = {
+    clientX: rect.left + (point.x / 100) * rect.width,
+    clientY: rect.top + (point.y / 100) * rect.height,
+  };
+  magnifierLastClient = clientPoint;
+  updateMagnifier(clientPoint);
 }
 
 function hasAnnotationArrow(annotation) {
@@ -1483,7 +1665,7 @@ function removeEmptyDraftAnnotations() {
 }
 
 function hasReferenceImages(annotation) {
-  return Array.isArray(annotation.images) && annotation.images.length > 0;
+  return Array.isArray(annotation?.images) && annotation.images.length > 0;
 }
 
 function bindMarkMove(box, annotation) {
@@ -1948,6 +2130,99 @@ function hideCommentImagePreview() {
   commentImagePreview.classList.remove("open");
 }
 
+async function exportStaticBoard() {
+  const pages = [...pageStack.querySelectorAll(".doc-page")]
+    .map((page) => {
+      const canvas = page.querySelector("canvas");
+      if (!canvas?.width || !canvas?.height) return null;
+      return {
+        id: page.dataset.pageId,
+        width: canvas.width,
+        height: canvas.height,
+        image: canvas.toDataURL("image/png"),
+      };
+    })
+    .filter(Boolean);
+
+  const exportedAnnotations = annotations
+    .filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation))
+    .map((annotation) => ({
+      ...annotation,
+      color: getAnnotationColor(annotation),
+      intentLabel: getAnnotationIntentLabel(annotation),
+      fallbackText: getAnnotationFallbackText(annotation),
+      regionImage: annotation.type === "mark" ? createAnnotationRegionImage(annotation) : "",
+    }));
+
+  const payload = {
+    title: docTitle.textContent || t("appTitle"),
+    subtitle: docSubtitle.textContent || "",
+    exportedAt: new Date().toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en"),
+    pages,
+    annotations: exportedAnnotations,
+  };
+
+  const html = createStaticBoardHtml(payload);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${sanitizeFilename(payload.title || "pointking-review")}-annotations.html`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function createStaticBoardHtml(payload) {
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="${currentLanguage === "zh" ? "zh-CN" : "en"}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(payload.title)} - PointKing</title>
+<style>
+:root{color-scheme:dark;--bg:#08090c;--panel:#101116;--panel-2:#151720;--line:rgba(255,255,255,.1);--text:#f5f5f7;--muted:#8f96a3;--accent:#6e7cff;--danger:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:14px}
+.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.pages{display:grid;gap:28px;justify-items:center}.page{position:relative;width:min(920px,100%);background:white;box-shadow:0 20px 60px rgba(0,0,0,.34)}.page>img{display:block;width:100%;height:auto}.badge{position:absolute;left:0;bottom:calc(100% + 5px);padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);font-size:11px;font-weight:700}.mark,.dot,.arrow{position:absolute}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.dot{width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.arrow{inset:0;pointer-events:none;color:var(--c);overflow:visible}.arrow line{stroke:currentColor;stroke-width:var(--w);stroke-linecap:round;vector-effect:non-scaling-stroke}.tooltip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tooltip,.dot-wrap:hover .tooltip{display:block}.dot-wrap{position:absolute}.side{min-width:0;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto}.side-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:12px}.side h2{margin:0;font-size:14px}.count{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group-title{display:flex;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;padding:10px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.avatar{display:grid;width:28px;height:28px;place-items:center;border-radius:7px;background:color-mix(in srgb,var(--c) 22%,transparent);color:#fff;font-size:11px;font-weight:800}.card strong{display:block;margin-bottom:4px;font-size:12px}.card p{margin:0 0 7px;color:#c7ccd5;font-size:12px;line-height:1.45}.thumb{display:block;width:100%;max-height:96px;object-fit:cover;border:1px solid color-mix(in srgb,var(--c) 56%,var(--line));border-radius:7px;background:#fff}.refs{display:flex;gap:6px;flex-wrap:wrap}.refs img{width:56px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <main class="stage">
+    <header class="top"><div><h1>${escapeHtml(payload.title)}</h1><div class="meta">${escapeHtml(payload.subtitle)}</div></div><div class="meta">${escapeHtml(payload.exportedAt)}</div></header>
+    <section class="pages" id="pages"></section>
+  </main>
+  <aside class="side"><div class="side-head"><h2>${currentLanguage === "zh" ? "批注" : "Annotations"}</h2><span class="count" id="count"></span></div><div id="comments"></div></aside>
+</div>
+<div class="preview" id="preview"><img alt=""></div>
+<script>
+const data=${json};
+const pages=document.querySelector("#pages"),comments=document.querySelector("#comments"),count=document.querySelector("#count"),preview=document.querySelector("#preview"),previewImg=preview.querySelector("img");
+const byPage=new Map(data.pages.map(p=>[String(p.id),p]));
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function label(a){return a.intentLabel+" · "+(document.documentElement.lang.startsWith("zh")?"第 "+a.pageId+" 页":"Page "+a.pageId)}
+data.pages.forEach(p=>{const el=document.createElement("section");el.className="page";el.id="page-"+p.id;el.style.aspectRatio=p.width+"/"+p.height;el.innerHTML='<span class="badge">Page '+esc(p.id)+'</span><img src="'+p.image+'" alt="Page '+esc(p.id)+'">';pages.append(el)});
+data.annotations.forEach(a=>{const page=document.querySelector("#page-"+CSS.escape(String(a.pageId)));if(!page)return;const c=a.color||"#6e7cff";if(a.type==="mark"){const el=document.createElement("div");el.className="mark "+(a.intent==="deleteContent"?"delete":"");el.style.cssText="--c:"+c+";left:"+a.x+"%;top:"+a.y+"%;width:"+a.width+"%;height:"+a.height+"%";el.dataset.id=a.id;el.innerHTML='<div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(el)}else{const wrap=document.createElement("div");wrap.className="dot-wrap";wrap.style.cssText="left:"+a.x+"%;top:"+a.y+"%";wrap.dataset.id=a.id;wrap.innerHTML='<span class="dot" style="--c:'+c+'"></span><div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(wrap)}if(Number.isFinite(a.arrowX)&&Number.isFinite(a.arrowY)){const start=a.arrowAnchor==="right"?[a.x+a.width,a.y+a.height/2]:a.arrowAnchor==="bottom"?[a.x+a.width/2,a.y+a.height]:a.arrowAnchor==="left"?[a.x,a.y+a.height/2]:[a.x+a.width/2,a.y];const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.classList.add("arrow");svg.style.setProperty("--c",c);svg.style.setProperty("--w",(a.arrowWidth||.75)+"px");svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("preserveAspectRatio","none");svg.innerHTML='<defs><marker id="m-'+a.id+'" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="currentColor"/></marker></defs><line x1="'+start[0]+'" y1="'+start[1]+'" x2="'+a.arrowX+'" y2="'+a.arrowY+'" marker-end="url(#m-'+a.id+')"/>';page.append(svg)}});
+const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"第 "+esc(pageId)+" 页":"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0)).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">PK</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
+comments.addEventListener("click",e=>{const card=e.target.closest(".card");if(!card)return;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");const mark=document.querySelector('[data-id="'+CSS.escape(card.dataset.id)+'"]');mark?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"})});
+document.addEventListener("mouseover",e=>{const img=e.target.closest(".thumb,.refs img");if(!img)return;previewImg.src=img.src;preview.classList.add("open")});
+document.addEventListener("mousemove",e=>{if(!preview.classList.contains("open"))return;preview.style.left=Math.min(innerWidth-540,e.clientX+14)+"px";preview.style.top=Math.max(12,Math.min(innerHeight-360,e.clientY+14))+"px"});
+document.addEventListener("mouseout",e=>{if(e.target.closest(".thumb,.refs img"))preview.classList.remove("open")});
+</script>
+</body>
+</html>`;
+}
+
+function sanitizeFilename(name) {
+  return String(name).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "pointking-review";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
+}
+
 function focusAnnotationFromComment(annotationId) {
   fitAnnotationPageInViewport(annotationId, { force: true });
 }
@@ -2037,7 +2312,6 @@ function createAnnotationFocusMask(annotation) {
         y: String(annotation.y),
         width: String(annotation.width),
         height: String(annotation.height),
-        rx: "0.6",
         fill: "black",
       }),
     );
