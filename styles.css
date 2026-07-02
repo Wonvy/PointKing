@@ -1706,28 +1706,27 @@ html[data-theme="light"] .comment.active {
 }
 
 @media (max-width: 560px) {
+  .app {
+    grid-template-rows: minmax(0, 1fr) minmax(178px, 34dvh);
+  }
+
   .rail {
-    grid-template-columns: 1fr;
-  }
-
-  .dropzone {
-    min-height: 64px;
-  }
-
-  .brand {
     display: none;
   }
 
   .topbar {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
+    gap: 8px;
     position: sticky;
     top: 0;
     z-index: 5;
+    padding: 8px 10px;
   }
 
   .tools {
-    min-height: 44px;
+    min-height: 40px;
+    gap: 6px;
+    padding: 3px;
   }
 
   .document-title span {
@@ -1735,11 +1734,23 @@ html[data-theme="light"] .comment.active {
   }
 
   .actions {
-    gap: 6px;
+    gap: 5px;
+  }
+
+  #languageBtn,
+  #themeBtn {
+    display: none;
+  }
+
+  .ghost,
+  .tool {
+    width: 36px;
+    height: 36px;
   }
 
   .primary {
-    width: 38px;
+    width: 40px;
+    height: 36px;
     padding: 0;
   }
 
@@ -1762,12 +1773,71 @@ html[data-theme="light"] .comment.active {
 
   .page-stack {
     left: 1080px;
-    top: 120px;
+    top: 96px;
     width: min(390px, calc(100vw - 28px));
     gap: 18px;
   }
 
   .doc-page {
     min-height: 520px;
+  }
+
+  .comments {
+    max-height: none;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    padding: 10px 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .comments-head {
+    margin-bottom: 8px;
+  }
+
+  .comment-filters {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .comment-search {
+    height: 30px;
+  }
+
+  .comment-filter-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .comment-filter-tab {
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .comment-list {
+    gap: 8px;
+  }
+
+  .comment-page-group {
+    min-width: 250px;
+  }
+
+  .comment {
+    padding: 10px;
+  }
+
+  .comment-region-preview {
+    height: 74px;
+  }
+
+  .annotation-editor {
+    width: min(242px, calc(100vw - 28px));
+  }
+
+  .magnifier-lens {
+    width: 150px;
+    height: 150px;
+  }
+
+  .magnifier-lens canvas {
+    width: 150px;
+    height: 150px;
   }
 }
