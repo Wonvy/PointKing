@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>&#25351;&#28857;&#29579;</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260703-compact-collapsed-groups" />
   </head>
   <body>
     <div class="app">
@@ -68,6 +68,9 @@
             <button class="tool" data-tool="mark" title="&#26631;&#27880;" aria-label="&#26631;&#27880;">
               <i data-lucide="message-square-text"></i>
             </button>
+            <button class="tool magnifier-toggle" id="magnifierBtn" title="&#25918;&#22823;&#38236;" aria-label="&#25918;&#22823;&#38236;" aria-pressed="false">
+              <i data-lucide="search"></i>
+            </button>
           </div>
 
           <div class="actions">
@@ -121,11 +124,19 @@
           </button>
         </div>
 
+        <div class="comment-filters" aria-label="Annotation filters">
+          <label class="comment-search">
+            <i data-lucide="search"></i>
+            <input id="commentSearch" type="search" autocomplete="off" />
+          </label>
+          <div class="comment-filter-tabs" id="commentFilterTabs" role="tablist" aria-label="Annotation type"></div>
+        </div>
+
         <div class="comment-list" id="commentList"></div>
       </aside>
     </div>
 
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-    <script src="./script.js?v=20260703-annotation-menu" type="module"></script>
+    <script src="./script.js?v=20260703-dblclick-edit-fix" type="module"></script>
   </body>
 </html>

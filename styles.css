@@ -135,12 +135,14 @@ svg {
 
 .comments {
   border-width: 0 0 0 1px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .resize-handle {
   position: relative;
   z-index: 20;
-  background: color-mix(in srgb, var(--panel) 42%, transparent);
+  background: transparent;
   cursor: col-resize;
   touch-action: none;
 }
@@ -148,47 +150,68 @@ svg {
 .resize-handle::after {
   content: "";
   position: absolute;
-  inset: 0 2px;
-  border-left: 1px solid transparent;
-  border-right: 1px solid transparent;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: color-mix(in srgb, var(--line) 78%, transparent);
+  transform: translateX(-50%);
+  transition:
+    background 140ms ease,
+    width 140ms ease;
 }
 
 .resize-handle:hover,
 .resize-handle.dragging {
-  background: rgba(110, 124, 255, 0.12);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .resize-handle:hover::after,
 .resize-handle.dragging::after {
-  border-color: rgba(110, 124, 255, 0.45);
+  width: 2px;
+  background: color-mix(in srgb, var(--accent) 62%, var(--line));
 }
 
 .collapse-toggle {
   position: absolute;
-  top: 12px;
+  top: 50%;
   z-index: 30;
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 44px;
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
   color: var(--soft);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+  transform: translateY(-50%);
+  backdrop-filter: blur(14px);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 }
 
 .collapse-toggle:hover {
-  background: #f4f4f5;
-  color: #08090c;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--text);
+  transform: translateY(-50%) scale(1.04);
+}
+
+.collapse-toggle svg {
+  width: 14px;
+  height: 14px;
 }
 
 .collapse-toggle-left {
-  left: -14px;
+  left: -11px;
 }
 
 .collapse-toggle-right {
-  right: -14px;
+  right: -11px;
 }
 
 .brand,
@@ -503,6 +526,53 @@ svg {
   transform: translate(-50%, 0);
 }
 
+.magnifier-lens {
+  position: fixed;
+  z-index: 130;
+  display: grid;
+  width: 180px;
+  height: 180px;
+  place-items: center;
+  border: 2px solid color-mix(in srgb, var(--accent) 76%, white);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: scale(0.92);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.magnifier-lens.open {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.magnifier-lens canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.magnifier-lens::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 24px;
+  height: 24px;
+  border-left: 3px solid var(--accent-2);
+  border-top: 3px solid var(--accent-2);
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.95))
+    drop-shadow(0 0 5px rgba(0, 0, 0, 0.45));
+  transform: translate(-50%, -50%);
+}
+
 .canvas-surface {
   position: absolute;
   left: 0;
@@ -604,7 +674,7 @@ html[data-theme="light"] .placeholder {
 .page-badge {
   position: absolute;
   left: 0;
-  top: -24px;
+  bottom: calc(100% + 4px);
   z-index: 3;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -615,7 +685,6 @@ html[data-theme="light"] .placeholder {
   font-weight: 750;
   line-height: 1;
   backdrop-filter: blur(10px);
-  transform: translateY(-100%);
 }
 
 .overlay {
@@ -630,7 +699,65 @@ html[data-theme="light"] .placeholder {
 
 .annotation-ui {
   position: absolute;
+  z-index: 2;
   pointer-events: auto;
+}
+
+.annotation-arrow {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  color: var(--annotation-color, var(--accent));
+  overflow: visible;
+  pointer-events: none;
+}
+
+.annotation-arrow line {
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.annotation-arrow .arrow-line {
+  stroke: currentColor;
+  stroke-width: var(--arrow-width, 0.75px);
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.42));
+  pointer-events: none;
+}
+
+.annotation-arrow .arrow-hit {
+  stroke: transparent;
+  stroke-width: 12px;
+  cursor: grab;
+  pointer-events: stroke;
+}
+
+.annotation-arrow .arrow-endpoint {
+  fill: var(--annotation-color, var(--accent));
+  stroke: white;
+  stroke-width: 0.45;
+  cursor: grab;
+  opacity: 0;
+  pointer-events: auto;
+  vector-effect: non-scaling-stroke;
+}
+
+.annotation-arrow.hovered .arrow-line,
+.annotation-arrow.dragging .arrow-line {
+  filter:
+    drop-shadow(0 1px 3px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--annotation-color, var(--accent)) 72%, transparent));
+}
+
+.annotation-arrow.hovered .arrow-endpoint,
+.annotation-arrow.dragging .arrow-endpoint {
+  opacity: 1;
+}
+
+.annotation-arrow.dragging .arrow-hit,
+.annotation-arrow.dragging .arrow-endpoint {
+  cursor: grabbing;
 }
 
 .mark-box {
@@ -641,6 +768,71 @@ html[data-theme="light"] .placeholder {
   background: transparent;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16) inset;
   cursor: move;
+}
+
+.mark-box.intent-deleteContent {
+  background: color-mix(in srgb, var(--annotation-color, #ff6b6b) 16%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--annotation-color, #ff6b6b) 26%, white) inset,
+    0 0 14px color-mix(in srgb, var(--annotation-color, #ff6b6b) 20%, transparent);
+}
+
+.arrow-anchor {
+  --control-scale: var(--inverse-zoom, 1);
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  display: block;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  border: 2px solid white;
+  border-radius: 99px;
+  background: var(--annotation-color, var(--accent));
+  cursor: crosshair;
+  opacity: 0;
+  padding: 0;
+  pointer-events: auto;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  transform: translate(-50%, -50%) scale(var(--control-scale));
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.arrow-anchor-top {
+  left: 50%;
+  top: 0;
+}
+
+.arrow-anchor-right {
+  left: 100%;
+  top: 50%;
+}
+
+.arrow-anchor-bottom {
+  left: 50%;
+  top: 100%;
+}
+
+.arrow-anchor-left {
+  left: 0;
+  top: 50%;
+}
+
+.mark-box:hover .arrow-anchor,
+.mark-box.editing .arrow-anchor,
+.arrow-anchor:hover {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(var(--control-scale));
+}
+
+.arrow-anchor:hover {
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.25),
+    0 0 0 5px color-mix(in srgb, var(--annotation-color, var(--accent)) 22%, transparent);
 }
 
 .mark-box.previewing {
@@ -659,16 +851,16 @@ html[data-theme="light"] .placeholder {
     0 0 18px rgba(110, 124, 255, 0.32);
 }
 
+.mark-box.intent-deleteContent.moving,
+.mark-box.intent-deleteContent.resizing {
+  background: color-mix(in srgb, var(--annotation-color, #ff6b6b) 16%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--annotation-color, #ff6b6b) 28%, white) inset,
+    0 0 18px color-mix(in srgb, var(--annotation-color, #ff6b6b) 30%, transparent);
+}
+
 .annotation-ui.focused {
   animation: annotation-focus 900ms ease;
-}
-
-.mark-box.breathing {
-  animation: annotation-breathe 1400ms ease-in-out infinite;
-}
-
-.text-note.breathing .text-dot {
-  animation: dot-breathe 1400ms ease-in-out infinite;
 }
 
 @keyframes annotation-focus {
@@ -682,40 +874,16 @@ html[data-theme="light"] .placeholder {
   }
 }
 
-@keyframes annotation-breathe {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.16) inset,
-      0 0 0 rgba(110, 124, 255, 0);
-    filter: drop-shadow(0 0 0 color-mix(in srgb, var(--annotation-color, var(--accent)) 0%, transparent));
-  }
-
-  50% {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--annotation-color, var(--accent)) 72%, white) inset,
-      0 0 18px color-mix(in srgb, var(--annotation-color, var(--accent)) 58%, transparent);
-    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--annotation-color, var(--accent)) 68%, transparent));
-  }
+.annotation-focus-mask {
+  pointer-events: none;
 }
 
-@keyframes dot-breathe {
-  0%,
-  100% {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
-    transform: scale(1);
-  }
-
-  50% {
-    box-shadow:
-      0 2px 8px rgba(0, 0, 0, 0.28),
-      0 0 0 7px color-mix(in srgb, var(--annotation-color, var(--danger)) 26%, transparent),
-      0 0 18px color-mix(in srgb, var(--annotation-color, var(--danger)) 70%, transparent);
-    transform: scale(1.12);
-  }
+.annotation-focus-dim {
+  fill: rgba(2, 5, 14, 0.58);
 }
 
 .annotation-editor {
+  --editor-scale: var(--inverse-zoom, 1);
   position: absolute;
   z-index: 18;
   display: block;
@@ -727,6 +895,7 @@ html[data-theme="light"] .placeholder {
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
   pointer-events: auto;
+  transform-origin: top left;
 }
 
 .annotation-tooltip {
@@ -812,24 +981,61 @@ html[data-theme="light"] .placeholder {
   gap: 8px;
 }
 
-.annotation-colors {
-  display: flex;
+.annotation-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 78%, transparent);
+  padding: 3px;
+}
+
+.annotation-tab {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
-.annotation-color {
-  width: 18px;
-  height: 18px;
-  border: 1px solid color-mix(in srgb, var(--swatch-color) 70%, white);
+.annotation-tab-dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
   border-radius: 99px;
-  background: var(--swatch-color);
-  padding: 0;
-  box-shadow: 0 0 0 2px transparent;
+  background: #58d7a5;
+  box-shadow: 0 0 0 2px rgba(88, 215, 165, 0.12);
 }
 
-.annotation-color.active {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--swatch-color) 32%, transparent);
+.annotation-tab.edit .annotation-tab-dot {
+  background: #6e7cff;
+  box-shadow: 0 0 0 2px rgba(110, 124, 255, 0.14);
+}
+
+.annotation-tab.danger .annotation-tab-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.annotation-tab:hover,
+.annotation-tab.active {
+  background: color-mix(in srgb, var(--annotation-color, var(--accent)) 16%, transparent);
+  color: var(--text);
+}
+
+.annotation-tab.danger:hover,
+.annotation-tab.danger.active {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: #ffb4b4;
 }
 
 .annotation-input-row {
@@ -859,15 +1065,16 @@ html[data-theme="light"] .placeholder {
 }
 
 .mark-editor {
-  transform: translateY(0);
+  transform: scale(var(--editor-scale));
 }
 
 .mark-editor.flipped {
-  transform: translateX(-100%);
+  transform: translateX(-100%) scale(var(--editor-scale));
+  transform-origin: top right;
 }
 
 .text-editor {
-  transform: translateY(-10px);
+  transform: translateY(var(--editor-offset-y, -10px)) scale(var(--editor-scale));
 }
 
 .save-annotation {
@@ -934,9 +1141,9 @@ html[data-theme="light"] .placeholder {
 
 .text-dot {
   flex: 0 0 auto;
-  width: 9px;
-  height: 9px;
-  margin-top: 12px;
+  width: 14px;
+  height: 14px;
+  margin-top: 9px;
   border: 2px solid white;
   border-radius: 99px;
   background: var(--annotation-color, var(--danger));
@@ -944,24 +1151,36 @@ html[data-theme="light"] .placeholder {
 }
 
 .resize-corner {
+  --control-scale: var(--inverse-zoom, 1);
   position: absolute;
-  right: -6px;
-  bottom: -6px;
   box-sizing: border-box;
   display: block;
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  min-height: 14px;
-  aspect-ratio: 1;
+  width: 16px;
+  height: 12px;
+  min-width: 16px;
+  min-height: 12px;
   border: 2px solid white;
-  border-radius: 99px;
+  border-radius: 4px;
   background: var(--annotation-color, var(--accent));
-  cursor: nwse-resize;
   padding: 0;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
   opacity: 0;
+  transform: scale(var(--control-scale));
   transition: opacity 120ms ease;
+}
+
+.resize-corner-top-left {
+  left: -8px;
+  top: -6px;
+  cursor: nwse-resize;
+  transform-origin: center;
+}
+
+.resize-corner-bottom-right {
+  right: -8px;
+  bottom: -6px;
+  cursor: nwse-resize;
+  transform-origin: center;
 }
 
 .mark-box:hover .resize-corner,
@@ -985,6 +1204,75 @@ html[data-theme="light"] .placeholder {
   font-size: 14px;
 }
 
+.comment-filters {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.comment-search {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 84%, transparent);
+  color: var(--muted);
+  padding: 0 9px;
+}
+
+.comment-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  color: var(--text);
+}
+
+.comment-search svg {
+  width: 15px;
+  height: 15px;
+}
+
+.comment-search input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.comment-search input::placeholder {
+  color: var(--muted);
+}
+
+.comment-filter-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 74%, transparent);
+  padding: 3px;
+}
+
+.comment-filter-tab {
+  min-width: 0;
+  height: 26px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.comment-filter-tab:hover,
+.comment-filter-tab.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
 .compact {
   width: 32px;
   height: 32px;
@@ -992,8 +1280,82 @@ html[data-theme="light"] .placeholder {
 
 .comment-list {
   display: grid;
+  align-content: start;
+  align-items: start;
   gap: 10px;
   min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.comment-list::-webkit-scrollbar {
+  display: none;
+}
+
+.comment-page-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.comment-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 82%, transparent);
+  color: var(--soft);
+  padding: 0 9px;
+}
+
+.comment-page-header:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  color: var(--text);
+}
+
+.comment-page-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comment-page-title svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 140ms ease;
+}
+
+.comment-page-count {
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.comment-page-items {
+  display: grid;
+  gap: 10px;
+}
+
+.comment-page-group.collapsed .comment-page-title svg {
+  transform: rotate(-90deg);
+}
+
+.comment-page-group.collapsed .comment-page-items {
+  display: none;
 }
 
 .comment {
@@ -1248,7 +1610,7 @@ html[data-theme="light"] .comment.active {
   .comment-list {
     grid-auto-flow: column;
     grid-auto-columns: minmax(245px, 1fr);
-    overflow: hidden;
+    overflow: auto;
   }
 }
 

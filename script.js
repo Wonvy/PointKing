@@ -13,7 +13,8 @@ const dropzone = document.querySelector("#dropzone");
 const docTitle = document.querySelector("#docTitle");
 const fileName = document.querySelector("#fileName");
 const fileMeta = document.querySelector("#fileMeta");
-const tools = document.querySelectorAll(".tool");
+const tools = document.querySelectorAll(".tool[data-tool]");
+const magnifierBtn = document.querySelector("#magnifierBtn");
 const undoBtn = document.querySelector("#undoBtn");
 const clearBtn = document.querySelector("#clearBtn");
 const shareBtn = document.querySelector("#shareBtn");
@@ -21,6 +22,8 @@ const shareText = document.querySelector("#shareText");
 const zoomReadout = document.querySelector("#zoomReadout");
 const commentList = document.querySelector("#commentList");
 const commentCount = document.querySelector("#commentCount");
+const commentSearch = document.querySelector("#commentSearch");
+const commentFilterTabs = document.querySelector("#commentFilterTabs");
 const brandName = document.querySelector("#brandName");
 const brandSub = document.querySelector("#brandSub");
 const dropTitle = document.querySelector("#dropTitle");
@@ -35,6 +38,7 @@ const placeholderCopy = document.querySelector("#placeholderCopy");
 const commentsTitle = document.querySelector("#commentsTitle");
 const canvasMenu = createCanvasMenu();
 const annotationNotice = createAnnotationNotice();
+const magnifierLens = createMagnifierLens();
 let commentImagePreview;
 
 const translations = {
@@ -53,11 +57,20 @@ const translations = {
     placeholderCopy:
       "\u5bfc\u5165 PDF \u540e\uff0c\u9875\u9762\u4f1a\u5728\u65e0\u9650\u753b\u5e03\u4e0a\u7eb5\u5411\u6392\u5e03\u3002\u6309\u4f4f Ctrl \u5e76\u6eda\u52a8\u9f20\u6807\u53ef\u4ee5\u7f29\u653e\u753b\u5e03\u3002",
     markTool: "\u6279\u6ce8",
+    magnifierTool: "\u653e\u5927\u955c",
     selectTool: "\u9009\u62e9",
     textTool: "\u6587\u5b57",
     undo: "\u64a4\u9500",
     clear: "\u6e05\u7a7a",
     inputPlaceholder: "\u8f93\u5165\u610f\u89c1",
+    suggestionTab: "\u5efa\u8bae",
+    editTextTab: "\u4fee\u6539\u6587\u672c",
+    deleteTab: "\u5220\u9664",
+    editTextPlaceholder: "\u8f93\u5165\u9700\u8981\u66ff\u6362\u7684\u6587\u672c",
+    deletePlaceholder: "\u8f93\u5165\u9700\u8981\u5220\u9664\u7684\u5185\u5bb9\u6216\u8bf4\u660e",
+    deleteFallback: "\u5220\u9664\u6b64\u533a\u57df\u5185\u5bb9",
+    searchAnnotations: "\u641c\u7d22\u6279\u6ce8",
+    filterAll: "\u5168\u90e8",
     unsavedAnnotation: "\u8bf7\u5148\u4fdd\u5b58\u5f53\u524d\u6279\u6ce8",
     editAnnotation: "\u7f16\u8f91",
     deleteAnnotation: "\u5220\u9664",
@@ -86,11 +99,20 @@ const translations = {
     placeholderCopy:
       "Import a PDF and every page is arranged on an infinite canvas. Hold Ctrl and scroll to zoom the canvas.",
     markTool: "Annotate",
+    magnifierTool: "Magnifier",
     selectTool: "Select",
     textTool: "Text",
     undo: "Undo",
     clear: "Clear",
     inputPlaceholder: "Type feedback",
+    suggestionTab: "Suggestion",
+    editTextTab: "Edit text",
+    deleteTab: "Delete",
+    editTextPlaceholder: "Type replacement text",
+    deletePlaceholder: "Describe the content to remove",
+    deleteFallback: "Remove this selected content",
+    searchAnnotations: "Search annotations",
+    filterAll: "All",
     unsavedAnnotation: "Save the current annotation first",
     editAnnotation: "Edit",
     deleteAnnotation: "Delete",
@@ -117,6 +139,12 @@ const languageStorageKey = "pointking.language";
 const themeStorageKey = "pointking.theme";
 const defaultAnnotationColor = "#6e7cff";
 const annotationColors = ["#6e7cff", "#00c2a8", "#ff6b6b", "#f5a524", "#8b5cf6"];
+const annotationIntentColors = {
+  suggestion: "#00c2a8",
+  editText: "#6e7cff",
+  deleteContent: "#ff6b6b",
+};
+const commentFilterOptions = ["all", "suggestion", "editText", "deleteContent"];
 
 let currentTool = "select";
 let currentLanguage = localStorage.getItem(languageStorageKey) || "zh";
@@ -133,7 +161,17 @@ let lastPanPoint = null;
 let editingAnnotationId = null;
 let regionPreviewFrame = null;
 let annotationNoticeTimer = null;
+let magnifierEnabled = false;
+let magnifierTimer = null;
+let magnifierActive = false;
+let magnifierWasShown = false;
+let magnifierPointerId = null;
+let magnifierPage = null;
+let magnifierLastClient = null;
+let commentSearchQuery = "";
+let commentFilterIntent = "all";
 const pendingRegionPreviewIds = new Set();
+const collapsedCommentGroups = new Set();
 
 pdfjs.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.worker.min.mjs";
@@ -148,6 +186,7 @@ bindResizeHandle(leftResizeHandle, "left");
 bindResizeHandle(rightResizeHandle, "right");
 bindCollapseButton(leftCollapseBtn, "left");
 bindCollapseButton(rightCollapseBtn, "right");
+renderCommentFilterTabs();
 renderLucideIcons();
 
 languageBtn.addEventListener("click", () => {
@@ -167,6 +206,10 @@ tools.forEach((button) => {
   button.addEventListener("click", () => {
     setCurrentTool(button.dataset.tool);
   });
+});
+
+magnifierBtn.addEventListener("click", () => {
+  setMagnifierEnabled(!magnifierEnabled);
 });
 
 canvasViewport.addEventListener("contextmenu", (event) => {
@@ -236,6 +279,8 @@ canvasViewport.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  startMagnifierHold(event, page);
+
   if (hasOpenAnnotationEditor()) {
     event.preventDefault();
     event.stopPropagation();
@@ -273,6 +318,11 @@ canvasViewport.addEventListener("pointerdown", (event) => {
 });
 
 canvasViewport.addEventListener("pointermove", (event) => {
+  if (event.pointerId === magnifierPointerId) {
+    magnifierLastClient = { clientX: event.clientX, clientY: event.clientY };
+    updateMagnifier(event);
+  }
+
   if (dragPreview && dragStart && currentTool === "mark") {
     const page = event.target.closest(".doc-page") || pageStack.querySelector(`.doc-page[data-page-id="${dragPreview.pageId}"]`);
     if (!page) return;
@@ -289,6 +339,10 @@ canvasViewport.addEventListener("pointermove", (event) => {
 });
 
 canvasViewport.addEventListener("pointerup", (event) => {
+  if (event.pointerId === magnifierPointerId) {
+    stopMagnifier();
+  }
+
   if (isPanning) {
     endPan(event);
     return;
@@ -328,7 +382,10 @@ canvasViewport.addEventListener("pointerup", (event) => {
   dragPreview = null;
 });
 
-canvasViewport.addEventListener("pointercancel", endPan);
+canvasViewport.addEventListener("pointercancel", (event) => {
+  if (event.pointerId === magnifierPointerId) stopMagnifier();
+  endPan(event);
+});
 
 undoBtn.addEventListener("click", () => {
   annotations.pop();
@@ -339,6 +396,11 @@ undoBtn.addEventListener("click", () => {
 clearBtn.addEventListener("click", () => {
   annotations = [];
   saveAnnotations();
+  renderAnnotations();
+});
+
+commentSearch.addEventListener("input", () => {
+  commentSearchQuery = commentSearch.value.trim().toLowerCase();
   renderAnnotations();
 });
 
@@ -353,14 +415,17 @@ commentList.addEventListener("mouseover", (event) => {
   const comment = event.target.closest("[data-annotation-id]");
   if (!comment || comment.contains(event.relatedTarget)) return;
 
-  setAnnotationBreathing(comment.dataset.annotationId, true);
+  setAnnotationFocusMask(comment.dataset.annotationId, true);
+  ensureAnnotationVisible(comment.dataset.annotationId);
+  setLinkedCommentActive(comment.dataset.annotationId, true);
 });
 
 commentList.addEventListener("mouseout", (event) => {
   const comment = event.target.closest("[data-annotation-id]");
   if (!comment || comment.contains(event.relatedTarget)) return;
 
-  setAnnotationBreathing(comment.dataset.annotationId, false);
+  setAnnotationFocusMask(comment.dataset.annotationId, false);
+  setLinkedCommentActive(comment.dataset.annotationId, false);
 });
 
 shareBtn.addEventListener("click", async () => {
@@ -396,10 +461,13 @@ function applyLanguage() {
   placeholderProduct.textContent = t("placeholderProduct");
   placeholderTitle.textContent = t("placeholderTitle");
   placeholderCopy.textContent = t("placeholderCopy");
+  commentSearch.placeholder = t("searchAnnotations");
+  commentSearch.setAttribute("aria-label", t("searchAnnotations"));
   languageText.textContent = currentLanguage === "zh" ? "EN" : "\u4e2d";
   languageBtn.title = currentLanguage === "zh" ? "English" : "\u4e2d\u6587";
   languageBtn.setAttribute("aria-label", currentLanguage === "zh" ? "Switch to English" : "\u5207\u6362\u5230\u4e2d\u6587");
   updateToolLabels();
+  renderCommentFilterTabs();
   updateCollapseButtons();
   applyTheme();
 }
@@ -429,6 +497,8 @@ function updateToolLabels() {
   undoBtn.setAttribute("aria-label", t("undo"));
   clearBtn.title = t("clear");
   clearBtn.setAttribute("aria-label", t("clear"));
+  magnifierBtn.title = t("magnifierTool");
+  magnifierBtn.setAttribute("aria-label", t("magnifierTool"));
   updateCanvasMenu();
 }
 
@@ -436,6 +506,70 @@ function setCurrentTool(tool) {
   currentTool = tool;
   tools.forEach((item) => item.classList.toggle("active", item.dataset.tool === tool));
   canvasMenu.querySelectorAll("[data-menu-tool]").forEach((item) => item.classList.toggle("active", item.dataset.menuTool === tool));
+}
+
+function setMagnifierEnabled(enabled) {
+  magnifierEnabled = enabled;
+  magnifierBtn.classList.toggle("active", enabled);
+  magnifierBtn.setAttribute("aria-pressed", String(enabled));
+  if (!enabled) stopMagnifier();
+}
+
+function startMagnifierHold(event, page) {
+  if (!magnifierEnabled || event.button !== 0) return;
+
+  window.clearTimeout(magnifierTimer);
+  magnifierActive = false;
+  magnifierWasShown = false;
+  magnifierPointerId = event.pointerId;
+  magnifierPage = page;
+  magnifierLastClient = { clientX: event.clientX, clientY: event.clientY };
+  magnifierTimer = window.setTimeout(() => {
+    magnifierActive = true;
+    magnifierWasShown = true;
+    magnifierLens.classList.add("open");
+    updateMagnifier(magnifierLastClient || event);
+  }, 260);
+}
+
+function updateMagnifier(event) {
+  if (!magnifierEnabled || !magnifierActive || !magnifierPage) return;
+
+  const page = magnifierPage;
+  const source = page.querySelector("canvas");
+  const lensCanvas = magnifierLens.querySelector("canvas");
+  if (!source || !lensCanvas) return;
+
+  const pageRect = page.getBoundingClientRect();
+  const xRatio = clamp((event.clientX - pageRect.left) / pageRect.width, 0, 1);
+  const yRatio = clamp((event.clientY - pageRect.top) / pageRect.height, 0, 1);
+  const sx = xRatio * source.width;
+  const sy = yRatio * source.height;
+  const sample = Math.max(18, Math.min(source.width, source.height) * 0.075);
+  const sw = Math.min(sample, source.width);
+  const sh = Math.min(sample, source.height);
+  const sourceX = clamp(sx - sw / 2, 0, source.width - sw);
+  const sourceY = clamp(sy - sh / 2, 0, source.height - sh);
+
+  const context = lensCanvas.getContext("2d");
+  context.clearRect(0, 0, lensCanvas.width, lensCanvas.height);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(source, sourceX, sourceY, sw, sh, 0, 0, lensCanvas.width, lensCanvas.height);
+
+  const size = 180;
+  magnifierLens.style.left = `${Math.min(window.innerWidth - size - 12, event.clientX + 18)}px`;
+  magnifierLens.style.top = `${Math.max(12, event.clientY - size - 18)}px`;
+}
+
+function stopMagnifier() {
+  window.clearTimeout(magnifierTimer);
+  magnifierTimer = null;
+  magnifierActive = false;
+  magnifierPointerId = null;
+  magnifierPage = null;
+  magnifierLastClient = null;
+  magnifierLens.classList.remove("open");
 }
 
 function createCanvasMenu() {
@@ -453,6 +587,17 @@ function createAnnotationNotice() {
   notice.setAttribute("aria-live", "polite");
   document.body.append(notice);
   return notice;
+}
+
+function createMagnifierLens() {
+  const lens = document.createElement("div");
+  lens.className = "magnifier-lens";
+  const canvas = document.createElement("canvas");
+  canvas.width = 180;
+  canvas.height = 180;
+  lens.append(canvas);
+  document.body.append(lens);
+  return lens;
 }
 
 function hasOpenAnnotationEditor() {
@@ -605,6 +750,8 @@ function zoomAt(clientX, clientY, deltaY) {
 
 function applyCanvasTransform() {
   canvasSurface.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
+  canvasSurface.style.setProperty("--inverse-zoom", String(1 / zoom));
+  canvasSurface.style.setProperty("--editor-offset-y", `${-10 / zoom}px`);
   zoomReadout.textContent = `${Math.round(zoom * 100)}%`;
 }
 
@@ -664,11 +811,11 @@ function updateCollapseButtons() {
 
   leftCollapseBtn.setAttribute("aria-label", leftCollapsed ? t("expandLeft") : t("collapseLeft"));
   leftCollapseBtn.title = leftCollapsed ? t("expandLeft") : t("collapseLeft");
-  leftCollapseBtn.replaceChildren(createIconPlaceholder(leftCollapsed ? "panel-left-open" : "panel-left-close"));
+  leftCollapseBtn.replaceChildren(createIconPlaceholder(leftCollapsed ? "chevron-right" : "chevron-left"));
 
   rightCollapseBtn.setAttribute("aria-label", rightCollapsed ? t("expandRight") : t("collapseRight"));
   rightCollapseBtn.title = rightCollapsed ? t("expandRight") : t("collapseRight");
-  rightCollapseBtn.replaceChildren(createIconPlaceholder(rightCollapsed ? "panel-right-open" : "panel-right-close"));
+  rightCollapseBtn.replaceChildren(createIconPlaceholder(rightCollapsed ? "chevron-left" : "chevron-right"));
 
   renderLucideIcons();
 }
@@ -751,6 +898,8 @@ function getPagePoint(event, page) {
 function addAnnotation(annotation) {
   annotation.id ||= crypto.randomUUID?.() || `annotation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   annotation.color ||= defaultAnnotationColor;
+  annotation.createdAt ||= Date.now();
+  annotation.updatedAt ||= annotation.createdAt;
   annotations.push(annotation);
   renderAnnotations();
   return annotation;
@@ -766,6 +915,7 @@ function renderAnnotations() {
 
   commentList.replaceChildren();
   let renderedCommentCount = 0;
+  const groupedComments = new Map();
 
   annotations.forEach((annotation) => {
     const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
@@ -774,13 +924,57 @@ function renderAnnotations() {
     const layer = getAnnotationLayer(page);
     if (annotation.type === "mark") drawMark(layer, annotation);
     if (annotation.type === "text") drawTextNote(layer, annotation);
-    if (!annotation.draft) {
-      addComment(annotation);
+    if (!annotation.draft && matchesCommentFilters(annotation)) {
+      if (!groupedComments.has(annotation.pageId)) groupedComments.set(annotation.pageId, []);
+      groupedComments.get(annotation.pageId).push(annotation);
       renderedCommentCount += 1;
     }
   });
 
+  renderCommentGroups(groupedComments);
   commentCount.textContent = String(renderedCommentCount);
+  renderLucideIcons();
+}
+
+function renderCommentFilterTabs() {
+  commentFilterTabs.replaceChildren();
+  commentFilterOptions.forEach((intent) => {
+    const button = document.createElement("button");
+    button.className = "comment-filter-tab";
+    button.type = "button";
+    button.dataset.filterIntent = intent;
+    button.classList.toggle("active", commentFilterIntent === intent);
+    button.textContent = intent === "all" ? t("filterAll") : getIntentLabelByKey(intent);
+    button.addEventListener("click", () => {
+      commentFilterIntent = intent;
+      renderCommentFilterTabs();
+      renderAnnotations();
+    });
+    commentFilterTabs.append(button);
+  });
+}
+
+function matchesCommentFilters(annotation) {
+  if (commentFilterIntent !== "all" && getAnnotationIntent(annotation) !== commentFilterIntent) return false;
+  if (!commentSearchQuery) return true;
+
+  return [
+    annotation.text,
+    getAnnotationFallbackText(annotation),
+    getAnnotationIntentLabel(annotation),
+    t("page", { page: annotation.pageId }),
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(commentSearchQuery));
+}
+
+function getIntentLabelByKey(intent) {
+  const labels = {
+    suggestion: t("suggestionTab"),
+    editText: t("editTextTab"),
+    deleteContent: t("deleteTab"),
+  };
+  return labels[intent] || intent;
 }
 
 function getAnnotationLayer(page) {
@@ -796,6 +990,7 @@ function getAnnotationLayer(page) {
 function drawMark(layer, annotation) {
   const box = document.createElement("div");
   box.className = "annotation-ui mark-box";
+  box.classList.add(`intent-${getAnnotationIntent(annotation)}`);
   if (annotation.preview) box.classList.add("previewing");
   if (isAnnotationEditing(annotation)) box.classList.add("editing");
   box.dataset.annotationId = annotation.id;
@@ -814,20 +1009,29 @@ function drawMark(layer, annotation) {
     layer.append(createAnnotationArrow(annotation));
   }
 
-  const handle = document.createElement("button");
-  handle.className = "resize-corner";
-  handle.type = "button";
-  handle.setAttribute("aria-label", "\u8c03\u6574\u6807\u6ce8\u5927\u5c0f");
-  const arrowHandle = document.createElement("button");
-  arrowHandle.className = "arrow-anchor";
-  arrowHandle.type = "button";
-  arrowHandle.setAttribute("aria-label", currentLanguage === "zh" ? "\u62d6\u62fd\u7ed8\u5236\u6307\u793a\u7bad\u5934" : "Drag to draw pointer arrow");
-  bindAnnotationResize(handle, annotation);
-  bindAnnotationArrow(arrowHandle, annotation);
+  const resizeHandles = ["top-left", "bottom-right"].map((corner) => {
+    const handle = document.createElement("button");
+    handle.className = `resize-corner resize-corner-${corner}`;
+    handle.type = "button";
+    handle.dataset.resizeCorner = corner;
+    handle.setAttribute("aria-label", "\u8c03\u6574\u6807\u6ce8\u5927\u5c0f");
+    bindAnnotationResize(handle, annotation, corner);
+    return handle;
+  });
+  const arrowHandles = ["top", "right", "bottom", "left"].map((side) => {
+    const arrowHandle = document.createElement("button");
+    arrowHandle.className = `arrow-anchor arrow-anchor-${side}`;
+    arrowHandle.type = "button";
+    arrowHandle.dataset.arrowAnchor = side;
+    arrowHandle.setAttribute("aria-label", currentLanguage === "zh" ? "\u62d6\u62fd\u7ed8\u5236\u6307\u793a\u7bad\u5934" : "Drag to draw pointer arrow");
+    bindAnnotationArrow(arrowHandle, annotation, side);
+    return arrowHandle;
+  });
   bindMarkMove(box, annotation);
   bindAnnotationEdit(box, annotation);
+  bindAnnotationHover(box, annotation);
 
-  box.append(arrowHandle, handle);
+  box.append(...arrowHandles, ...resizeHandles);
   if (!shouldShowAnnotationEditor(annotation)) {
     box.append(createAnnotationTooltip(annotation));
   }
@@ -863,6 +1067,14 @@ function hasAnnotationArrow(annotation) {
   return Number.isFinite(annotation.arrowX) && Number.isFinite(annotation.arrowY);
 }
 
+function getArrowStartPoint(annotation) {
+  const side = annotation.arrowAnchor || "top";
+  if (side === "right") return { x: annotation.x + annotation.width, y: annotation.y + annotation.height / 2 };
+  if (side === "bottom") return { x: annotation.x + annotation.width / 2, y: annotation.y + annotation.height };
+  if (side === "left") return { x: annotation.x, y: annotation.y + annotation.height / 2 };
+  return { x: annotation.x + annotation.width / 2, y: annotation.y };
+}
+
 function createAnnotationArrow(annotation) {
   const svg = createSvg("svg", {
     class: "annotation-arrow",
@@ -871,41 +1083,65 @@ function createAnnotationArrow(annotation) {
   });
   svg.dataset.annotationId = annotation.id;
   svg.style.setProperty("--annotation-color", getAnnotationColor(annotation));
+  svg.style.setProperty("--arrow-width", getAnnotationArrowWidth(annotation));
 
   const markerId = `arrow-head-${annotation.id}`;
   const defs = createSvg("defs");
   const marker = createSvg("marker", {
     id: markerId,
-    markerWidth: "7",
-    markerHeight: "7",
-    refX: "6",
-    refY: "3.5",
+    markerWidth: "10",
+    markerHeight: "10",
+    refX: "9",
+    refY: "5",
     orient: "auto",
     markerUnits: "strokeWidth",
   });
-  const head = createSvg("path", { d: "M0,0 L7,3.5 L0,7 Z", fill: "currentColor" });
+  const head = createSvg("path", { d: "M0,0 L10,5 L0,10 Z", fill: "currentColor" });
   marker.append(head);
   defs.append(marker);
+  const start = getArrowStartPoint(annotation);
 
-  const line = createSvg("line", {
-    x1: annotation.x,
-    y1: annotation.y,
+  const lineAttributes = {
+    x1: start.x,
+    y1: start.y,
     x2: annotation.arrowX,
     y2: annotation.arrowY,
+  };
+  const hitLine = createSvg("line", {
+    ...lineAttributes,
+    class: "arrow-hit",
+  });
+  const line = createSvg("line", {
+    ...lineAttributes,
+    class: "arrow-line",
     "marker-end": `url(#${markerId})`,
   });
-  svg.append(defs, line);
+  const endpoint = createSvg("circle", {
+    class: "arrow-endpoint",
+    cx: annotation.arrowX,
+    cy: annotation.arrowY,
+    r: "1.3",
+  });
+  svg.append(defs, hitLine, line, endpoint);
+  bindAnnotationArrowEdit(svg, annotation);
   return svg;
 }
 
 function updateAnnotationArrow(annotation) {
-  const arrow = pageStack.querySelector(`.annotation-arrow[data-annotation-id="${annotation.id}"] line`);
+  const arrow = pageStack.querySelector(`.annotation-arrow[data-annotation-id="${annotation.id}"]`);
   if (!arrow) return;
 
-  arrow.setAttribute("x1", annotation.x);
-  arrow.setAttribute("y1", annotation.y);
-  arrow.setAttribute("x2", annotation.arrowX);
-  arrow.setAttribute("y2", annotation.arrowY);
+  const start = getArrowStartPoint(annotation);
+  arrow.style.setProperty("--arrow-width", getAnnotationArrowWidth(annotation));
+  arrow.querySelectorAll("line").forEach((line) => {
+    line.setAttribute("x1", start.x);
+    line.setAttribute("y1", start.y);
+    line.setAttribute("x2", annotation.arrowX);
+    line.setAttribute("y2", annotation.arrowY);
+  });
+  const endpoint = arrow.querySelector(".arrow-endpoint");
+  endpoint?.setAttribute("cx", annotation.arrowX);
+  endpoint?.setAttribute("cy", annotation.arrowY);
 }
 
 function drawTextNote(layer, annotation) {
@@ -920,6 +1156,7 @@ function drawTextNote(layer, annotation) {
   dot.className = "text-dot";
   note.style.setProperty("--annotation-color", getAnnotationColor(annotation));
   bindAnnotationEdit(note, annotation);
+  bindAnnotationHover(note, annotation);
 
   note.append(dot);
   if (!shouldShowAnnotationEditor(annotation)) {
@@ -945,7 +1182,7 @@ function createAnnotationTooltip(annotation) {
   tooltip.className = "annotation-tooltip";
 
   const text = document.createElement("p");
-  text.textContent = annotation.text || t(`${annotation.type}Comment`);
+  text.textContent = annotation.text || getAnnotationFallbackText(annotation);
   tooltip.append(text);
 
   if (hasReferenceImages(annotation)) {
@@ -965,6 +1202,7 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   editor.dataset.annotationId = annotation.id;
   editor.style.setProperty("--annotation-color", getAnnotationColor(annotation));
   positionAnnotationEditor(editor, annotation);
+  let activeEditorMode = getAnnotationIntent(annotation);
 
   const saveButton = document.createElement("button");
   saveButton.className = "save-annotation";
@@ -972,28 +1210,44 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   saveButton.setAttribute("aria-label", currentLanguage === "zh" ? "\u4fdd\u5b58\u6279\u6ce8" : "Save annotation");
   saveButton.append(createIconPlaceholder("check"));
 
-  const colorRow = document.createElement("div");
-  colorRow.className = "annotation-colors";
-  annotationColors.forEach((color) => {
-    const swatch = document.createElement("button");
-    swatch.className = "annotation-color";
-    swatch.type = "button";
-    swatch.style.setProperty("--swatch-color", color);
-    swatch.classList.toggle("active", getAnnotationColor(annotation) === color);
-    swatch.setAttribute("aria-label", currentLanguage === "zh" ? "\u4fee\u6539\u6279\u6ce8\u989c\u8272" : "Change annotation color");
-    swatch.addEventListener("click", () => {
-      annotation.color = color;
-      editor.style.setProperty("--annotation-color", color);
-      getAnnotationVisualElement(annotation.id)?.style.setProperty("--annotation-color", color);
-      colorRow.querySelectorAll(".annotation-color").forEach((item) => item.classList.toggle("active", item === swatch));
+  const tabs = document.createElement("div");
+  tabs.className = "annotation-tabs";
+  const tabItems = [
+    ["suggestion", t("suggestionTab"), t("inputPlaceholder")],
+    ["editText", t("editTextTab"), t("editTextPlaceholder")],
+    ["deleteContent", t("deleteTab"), t("deletePlaceholder")],
+  ];
+
+  const activeTabItem = tabItems.find(([mode]) => mode === activeEditorMode) || tabItems[0];
+
+  tabItems.forEach(([mode, label, placeholder]) => {
+    const tab = document.createElement("button");
+    tab.className = "annotation-tab";
+    tab.type = "button";
+    tab.dataset.editorMode = mode;
+    const dot = document.createElement("span");
+    dot.className = "annotation-tab-dot";
+    const text = document.createElement("span");
+    text.textContent = label;
+    tab.append(dot, text);
+    tab.classList.toggle("active", mode === activeTabItem[0]);
+    if (mode === "editText") tab.classList.add("edit");
+    if (mode === "deleteContent") tab.classList.add("danger");
+    tab.addEventListener("click", () => {
+      activeEditorMode = mode;
+      input.placeholder = placeholder;
+      tabs.querySelectorAll(".annotation-tab").forEach((item) => item.classList.toggle("active", item === tab));
+      previewAnnotationIntent(annotation.id, activeEditorMode);
+      updateSaveState();
+      input.focus();
     });
-    colorRow.append(swatch);
+    tabs.append(tab);
   });
 
   const input = document.createElement("textarea");
   input.className = inputClassName;
   input.rows = 1;
-  input.placeholder = t("inputPlaceholder");
+  input.placeholder = activeTabItem[2];
   input.value = annotation.text || "";
   const inputRow = document.createElement("div");
   inputRow.className = "annotation-input-row";
@@ -1001,17 +1255,20 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   body.className = "editor-body";
   const references = createReferenceList(annotation);
   const updateSaveState = () => {
-    saveButton.classList.toggle("visible", input.value.trim().length > 0 || hasReferenceImages(annotation));
+    saveButton.classList.toggle(
+      "visible",
+      activeEditorMode === "deleteContent" || input.value.trim().length > 0 || hasReferenceImages(annotation),
+    );
   };
 
   editor.addEventListener("pointerdown", (event) => event.stopPropagation());
-  saveButton.addEventListener("click", () => commitAnnotation(annotation.id, input.value));
+  saveButton.addEventListener("click", () => commitAnnotation(annotation.id, input.value, activeEditorMode));
   input.addEventListener("input", updateSaveState);
   input.addEventListener("paste", (event) => handleAnnotationPaste(event, annotation, references, updateSaveState));
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
-      commitAnnotation(annotation.id, input.value);
+      commitAnnotation(annotation.id, input.value, activeEditorMode);
     }
 
     if (event.key === "Escape") {
@@ -1021,7 +1278,7 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   });
 
   inputRow.append(input, saveButton);
-  body.append(colorRow, inputRow, references);
+  body.append(tabs, inputRow, references);
   editor.append(body);
   updateSaveState();
   return editor;
@@ -1038,6 +1295,11 @@ function positionAnnotationEditor(editor, annotation) {
   }
 
   editor.style.left = `calc(${annotation.x}% + 14px)`;
+}
+
+function syncAnnotationEditorPosition(annotation) {
+  const editor = pageStack.querySelector(`.annotation-editor[data-annotation-id="${annotation.id}"]`);
+  if (editor) positionAnnotationEditor(editor, annotation);
 }
 
 function getAnnotationVisualElement(annotationId) {
@@ -1078,14 +1340,71 @@ function handleAnnotationPaste(event, annotation, references, onChange) {
       image.alt = currentLanguage === "zh" ? "\u53c2\u8003\u56fe" : "Reference image";
       references.append(image);
       onChange?.();
-      if (!annotation.draft) saveAnnotations();
+      if (!annotation.draft) {
+        touchAnnotation(annotation);
+        saveAnnotations();
+        renderAnnotations();
+      }
     };
     reader.readAsDataURL(file);
   });
 }
 
 function getAnnotationColor(annotation) {
-  return annotation.color || defaultAnnotationColor;
+  return getAnnotationIntentColor(getAnnotationIntent(annotation), annotation.color);
+}
+
+function getAnnotationIntentColor(intent, fallback = defaultAnnotationColor) {
+  return annotationIntentColors[intent] || fallback || defaultAnnotationColor;
+}
+
+function getAnnotationIntent(annotation) {
+  return annotation.intent || "suggestion";
+}
+
+function previewAnnotationIntent(annotationId, intent) {
+  const color = getAnnotationIntentColor(intent);
+  const editor = pageStack.querySelector(`.annotation-editor[data-annotation-id="${annotationId}"]`);
+  const visual = getAnnotationVisualElement(annotationId);
+  const arrow = pageStack.querySelector(`.annotation-arrow[data-annotation-id="${annotationId}"]`);
+
+  editor?.style.setProperty("--annotation-color", color);
+  visual?.style.setProperty("--annotation-color", color);
+  arrow?.style.setProperty("--annotation-color", color);
+
+  if (visual?.classList.contains("mark-box")) {
+    visual.classList.remove("intent-suggestion", "intent-editText", "intent-deleteContent");
+    visual.classList.add(`intent-${intent}`);
+  }
+}
+
+function getAnnotationIntentLabel(annotation) {
+  const labels = {
+    suggestion: t("suggestionTab"),
+    editText: t("editTextTab"),
+    deleteContent: t("deleteTab"),
+  };
+  return labels[getAnnotationIntent(annotation)] || labels.suggestion;
+}
+
+function getAnnotationFallbackText(annotation) {
+  if (getAnnotationIntent(annotation) === "deleteContent") return t("deleteFallback");
+  if (getAnnotationIntent(annotation) === "editText") return t("editTextPlaceholder");
+  return t(`${annotation.type}Comment`);
+}
+
+function getAnnotationUpdatedAt(annotation) {
+  return Number(annotation.updatedAt || annotation.createdAt || 0);
+}
+
+function touchAnnotation(annotation) {
+  const now = Date.now();
+  annotation.createdAt ||= now;
+  annotation.updatedAt = now;
+}
+
+function getAnnotationArrowWidth(annotation) {
+  return `${annotation.arrowWidth || 0.75}px`;
 }
 
 function focusAnnotationInput(annotationId) {
@@ -1105,17 +1424,20 @@ function openAnnotationEditor(annotationId) {
   focusAnnotationInput(annotationId);
 }
 
-function commitAnnotation(annotationId, value) {
+function commitAnnotation(annotationId, value, intent = "suggestion") {
   const annotation = annotations.find((item) => item.id === annotationId);
   if (!annotation) return;
 
   const text = value.trim();
-  if (!text && !hasReferenceImages(annotation)) {
+  if (intent !== "deleteContent" && !text && !hasReferenceImages(annotation)) {
     cancelAnnotation(annotationId);
     return;
   }
 
   annotation.text = text;
+  annotation.intent = intent;
+  annotation.color = getAnnotationIntentColor(intent);
+  touchAnnotation(annotation);
   annotation.draft = false;
   editingAnnotationId = null;
   saveAnnotations();
@@ -1176,15 +1498,18 @@ function bindMarkMove(box, annotation) {
     const start = getPagePoint(event, page);
     const startX = annotation.x;
     const startY = annotation.y;
+    let moved = false;
     box.classList.add("moving");
 
     const move = (moveEvent) => {
       const next = getPagePoint(moveEvent, page);
+      if (Math.hypot(next.x - start.x, next.y - start.y) > 0.2) moved = true;
       annotation.x = clamp(startX + next.x - start.x, 0, 100 - annotation.width);
       annotation.y = clamp(startY + next.y - start.y, 0, 100 - annotation.height);
       box.style.left = `${annotation.x}%`;
       box.style.top = `${annotation.y}%`;
       updateAnnotationArrow(annotation);
+      syncAnnotationEditorPosition(annotation);
       scheduleRegionPreviewRefresh(annotation.id);
     };
 
@@ -1193,7 +1518,11 @@ function bindMarkMove(box, annotation) {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       box.classList.remove("moving");
-      if (!annotation.draft) saveAnnotations();
+      if (moved && !annotation.draft) {
+        touchAnnotation(annotation);
+        saveAnnotations();
+        renderAnnotations();
+      }
     };
 
     window.addEventListener("pointermove", move);
@@ -1203,6 +1532,17 @@ function bindMarkMove(box, annotation) {
 }
 
 function bindAnnotationEdit(element, annotation) {
+  element.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.detail < 2 || event.target.closest(".annotation-editor, .resize-corner, .arrow-anchor")) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openAnnotationEditor(annotation.id);
+    },
+    { capture: true },
+  );
+
   element.addEventListener("dblclick", (event) => {
     if (event.target.closest(".annotation-editor, .resize-corner, .arrow-anchor")) return;
     event.preventDefault();
@@ -1211,7 +1551,20 @@ function bindAnnotationEdit(element, annotation) {
   });
 }
 
-function bindAnnotationArrow(handle, annotation) {
+function bindAnnotationHover(element, annotation) {
+  element.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "touch") return;
+    setLinkedCommentActive(annotation.id, true);
+    ensureCommentVisible(annotation.id);
+  });
+
+  element.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "touch") return;
+    setLinkedCommentActive(annotation.id, false);
+  });
+}
+
+function bindAnnotationArrow(handle, annotation, side) {
   handle.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1221,10 +1574,14 @@ function bindAnnotationArrow(handle, annotation) {
 
     handle.setPointerCapture?.(event.pointerId);
     const layer = getAnnotationLayer(page);
+    annotation.arrowAnchor = side;
     if (!hasAnnotationArrow(annotation)) {
-      annotation.arrowX = annotation.x;
-      annotation.arrowY = annotation.y;
+      const start = getArrowStartPoint(annotation);
+      annotation.arrowX = start.x;
+      annotation.arrowY = start.y;
       layer.prepend(createAnnotationArrow(annotation));
+    } else {
+      updateAnnotationArrow(annotation);
     }
 
     const move = (moveEvent) => {
@@ -1239,7 +1596,11 @@ function bindAnnotationArrow(handle, annotation) {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       handle.releasePointerCapture?.(event.pointerId);
-      if (!annotation.draft) saveAnnotations();
+      if (!annotation.draft) {
+        touchAnnotation(annotation);
+        saveAnnotations();
+        renderAnnotations();
+      }
     };
 
     move(event);
@@ -1249,24 +1610,103 @@ function bindAnnotationArrow(handle, annotation) {
   });
 }
 
-function bindAnnotationResize(handle, annotation) {
+function bindAnnotationArrowEdit(arrow, annotation) {
+  const hitTargets = [arrow.querySelector(".arrow-hit"), arrow.querySelector(".arrow-endpoint")].filter(Boolean);
+
+  hitTargets.forEach((target) => {
+    target.addEventListener("pointerenter", () => arrow.classList.add("hovered"));
+    target.addEventListener("pointerleave", () => arrow.classList.remove("hovered"));
+    target.addEventListener(
+      "wheel",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = annotation.arrowWidth || 0.75;
+        annotation.arrowWidth = clamp(current + (event.deltaY < 0 ? 0.15 : -0.15), 0.45, 2.4);
+        updateAnnotationArrow(annotation);
+        if (!annotation.draft) {
+          touchAnnotation(annotation);
+          saveAnnotations();
+          renderAnnotations();
+        }
+      },
+      { passive: false },
+    );
+
+    target.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const page = arrow.closest(".doc-page");
+      if (!page) return;
+
+      arrow.classList.add("dragging", "hovered");
+      target.setPointerCapture?.(event.pointerId);
+
+      const move = (moveEvent) => {
+        const next = getPagePoint(moveEvent, page);
+        annotation.arrowX = clamp(next.x, 0, 100);
+        annotation.arrowY = clamp(next.y, 0, 100);
+        updateAnnotationArrow(annotation);
+      };
+
+      const stop = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+        target.releasePointerCapture?.(event.pointerId);
+        arrow.classList.remove("dragging");
+        if (!target.matches(":hover")) arrow.classList.remove("hovered");
+        if (!annotation.draft) {
+          touchAnnotation(annotation);
+          saveAnnotations();
+          renderAnnotations();
+        }
+      };
+
+      move(event);
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    });
+  });
+}
+
+function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
   handle.addEventListener("pointerdown", (event) => {
     event.preventDefault();
     event.stopPropagation();
 
     const page = handle.closest(".doc-page");
     const start = getPagePoint(event, page);
+    const startX = annotation.x;
+    const startY = annotation.y;
     const startWidth = annotation.width;
     const startHeight = annotation.height;
+    const fixedRight = startX + startWidth;
+    const fixedBottom = startY + startHeight;
     const box = handle.closest(".mark-box");
     box.classList.add("resizing");
 
     const move = (moveEvent) => {
       const next = getPagePoint(moveEvent, page);
-      annotation.width = clamp(startWidth + next.x - start.x, 4, 100 - annotation.x);
-      annotation.height = clamp(startHeight + next.y - start.y, 3, 100 - annotation.y);
+      if (corner === "top-left") {
+        const nextX = clamp(startX + next.x - start.x, 0, fixedRight - 4);
+        const nextY = clamp(startY + next.y - start.y, 0, fixedBottom - 3);
+        annotation.x = nextX;
+        annotation.y = nextY;
+        annotation.width = fixedRight - nextX;
+        annotation.height = fixedBottom - nextY;
+        box.style.left = `${annotation.x}%`;
+        box.style.top = `${annotation.y}%`;
+      } else {
+        annotation.width = clamp(startWidth + next.x - start.x, 4, 100 - annotation.x);
+        annotation.height = clamp(startHeight + next.y - start.y, 3, 100 - annotation.y);
+      }
       box.style.width = `${annotation.width}%`;
       box.style.height = `${annotation.height}%`;
+      updateAnnotationArrow(annotation);
+      syncAnnotationEditorPosition(annotation);
       scheduleRegionPreviewRefresh(annotation.id);
     };
 
@@ -1275,7 +1715,11 @@ function bindAnnotationResize(handle, annotation) {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       box.classList.remove("resizing");
-      if (!annotation.draft) saveAnnotations();
+      if (!annotation.draft) {
+        touchAnnotation(annotation);
+        saveAnnotations();
+        renderAnnotations();
+      }
     };
 
     window.addEventListener("pointermove", move);
@@ -1290,7 +1734,56 @@ function createSvg(name, attributes = {}) {
   return element;
 }
 
-function addComment(annotation) {
+function renderCommentGroups(groupedComments) {
+  [...groupedComments.entries()]
+    .sort(([pageA], [pageB]) => Number(pageA) - Number(pageB))
+    .forEach(([pageId, pageAnnotations]) => {
+      const group = createCommentGroup(pageId, pageAnnotations.length);
+      const items = group.querySelector(".comment-page-items");
+      pageAnnotations
+        .slice()
+        .sort((first, second) => getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second))
+        .forEach((annotation) => addComment(annotation, items));
+      commentList.append(group);
+    });
+}
+
+function createCommentGroup(pageId, count) {
+  const group = document.createElement("section");
+  group.className = "comment-page-group";
+  group.dataset.pageId = pageId;
+  group.classList.toggle("collapsed", collapsedCommentGroups.has(pageId));
+
+  const header = document.createElement("button");
+  header.className = "comment-page-header";
+  header.type = "button";
+  header.setAttribute("aria-expanded", String(!collapsedCommentGroups.has(pageId)));
+
+  const title = document.createElement("span");
+  title.className = "comment-page-title";
+  title.append(createIconPlaceholder("chevron-down"), document.createTextNode(t("page", { page: pageId })));
+
+  const badge = document.createElement("span");
+  badge.className = "comment-page-count";
+  badge.textContent = String(count);
+
+  const items = document.createElement("div");
+  items.className = "comment-page-items";
+
+  header.append(title, badge);
+  header.addEventListener("click", () => {
+    const collapsed = !group.classList.contains("collapsed");
+    group.classList.toggle("collapsed", collapsed);
+    header.setAttribute("aria-expanded", String(!collapsed));
+    if (collapsed) collapsedCommentGroups.add(pageId);
+    else collapsedCommentGroups.delete(pageId);
+  });
+
+  group.append(header, items);
+  return group;
+}
+
+function addComment(annotation, container = commentList) {
   const article = document.createElement("article");
   article.className = "comment";
   article.dataset.annotationId = annotation.id;
@@ -1305,10 +1798,10 @@ function addComment(annotation) {
   body.className = "comment-body";
 
   const title = document.createElement("strong");
-  title.textContent = `${t(`${annotation.type}Tool`)} \u00b7 ${t("page", { page: annotation.pageId })}`;
+  title.textContent = `${getAnnotationIntentLabel(annotation)} \u00b7 ${t("page", { page: annotation.pageId })}`;
 
   const text = document.createElement("p");
-  text.textContent = annotation.text || t(`${annotation.type}Comment`);
+  text.textContent = annotation.text || getAnnotationFallbackText(annotation);
 
   const time = document.createElement("time");
   time.textContent = currentLanguage === "zh" ? "\u521a\u521a" : "Just now";
@@ -1321,7 +1814,7 @@ function addComment(annotation) {
   if (hasReferenceImages(annotation)) body.append(createCommentReferences(annotation));
   body.append(time);
   article.append(avatar, body);
-  commentList.prepend(article);
+  container.append(article);
 }
 
 function createCommentRegionPreview(annotation) {
@@ -1456,31 +1949,106 @@ function hideCommentImagePreview() {
 }
 
 function focusAnnotationFromComment(annotationId) {
+  fitAnnotationPageInViewport(annotationId, { force: true });
+}
+
+function ensureAnnotationVisible(annotationId) {
+  const target = pageStack.querySelector(`.annotation-ui[data-annotation-id="${annotationId}"]`);
+  if (!target) return;
+
+  const targetRect = target.getBoundingClientRect();
+  const viewportRect = canvasViewport.getBoundingClientRect();
+  const margin = 64;
+  const visible =
+    targetRect.right >= viewportRect.left + margin &&
+    targetRect.left <= viewportRect.right - margin &&
+    targetRect.bottom >= viewportRect.top + margin &&
+    targetRect.top <= viewportRect.bottom - margin;
+
+  if (!visible) fitAnnotationPageInViewport(annotationId);
+}
+
+function fitAnnotationPageInViewport(annotationId, options = {}) {
   const annotation = annotations.find((item) => item.id === annotationId);
-  if (!annotation) return;
+  if (!annotation) return false;
 
   const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
-  const target = pageStack.querySelector(`[data-annotation-id="${annotationId}"]`);
-  if (!page || !target) return;
+  if (!page) return false;
 
   const pageX = pageStack.offsetLeft + page.offsetLeft;
   const pageY = pageStack.offsetTop + page.offsetTop;
-  const x = annotation.type === "mark" ? annotation.x + annotation.width / 2 : annotation.x;
-  const y = annotation.type === "mark" ? annotation.y + annotation.height / 2 : annotation.y;
-  const worldX = pageX + (x / 100) * page.offsetWidth;
-  const worldY = pageY + (y / 100) * page.offsetHeight;
   const viewport = canvasViewport.getBoundingClientRect();
+  const padding = Math.min(96, Math.max(32, Math.min(viewport.width, viewport.height) * 0.08));
+  const fitWidth = (viewport.width - padding * 2) / page.offsetWidth;
+  const fitHeight = (viewport.height - padding * 2) / page.offsetHeight;
+  const nextZoom = clamp(Math.min(fitWidth, fitHeight), 0.35, 2.6);
+  const worldX = pageX + page.offsetWidth / 2;
+  const worldY = pageY + page.offsetHeight / 2;
 
+  zoom = nextZoom;
   pan.x = viewport.width / 2 - worldX * zoom;
   pan.y = viewport.height / 2 - worldY * zoom;
   applyCanvasTransform();
-
-  highlightAnnotation(annotationId);
+  if (options.force) highlightAnnotation(annotationId);
+  return true;
 }
 
-function setAnnotationBreathing(annotationId, active) {
-  const target = pageStack.querySelector(`.annotation-ui[data-annotation-id="${annotationId}"]`);
-  target?.classList.toggle("breathing", active);
+function setLinkedCommentActive(annotationId, active) {
+  const comment = commentList.querySelector(`[data-annotation-id="${annotationId}"]`);
+  comment?.classList.toggle("active", active);
+}
+
+function ensureCommentVisible(annotationId) {
+  const comment = commentList.querySelector(`[data-annotation-id="${annotationId}"]`);
+  if (!comment) return;
+
+  comment.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+}
+
+function setAnnotationFocusMask(annotationId, active) {
+  clearAnnotationFocusMasks();
+  if (!active) return;
+
+  const annotation = annotations.find((item) => item.id === annotationId);
+  if (!annotation || annotation.draft || annotation.preview) return;
+
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
+  const overlay = page?.querySelector(".overlay");
+  if (!overlay) return;
+
+  overlay.append(createAnnotationFocusMask(annotation));
+}
+
+function clearAnnotationFocusMasks() {
+  pageStack.querySelectorAll(".annotation-focus-mask").forEach((item) => item.remove());
+}
+
+function createAnnotationFocusMask(annotation) {
+  const id = `annotation-mask-${annotation.id}`;
+  const group = createSvg("g", { class: "annotation-focus-mask" });
+  const defs = createSvg("defs");
+  const mask = createSvg("mask", { id, maskUnits: "userSpaceOnUse" });
+  mask.append(createSvg("rect", { x: "0", y: "0", width: "100", height: "100", fill: "white" }));
+
+  if (annotation.type === "mark") {
+    mask.append(
+      createSvg("rect", {
+        x: String(annotation.x),
+        y: String(annotation.y),
+        width: String(annotation.width),
+        height: String(annotation.height),
+        rx: "0.6",
+        fill: "black",
+      }),
+    );
+  } else {
+    mask.append(createSvg("circle", { cx: String(annotation.x), cy: String(annotation.y), r: "2.8", fill: "black" }));
+  }
+
+  defs.append(mask);
+  group.append(defs);
+  group.append(createSvg("rect", { x: "0", y: "0", width: "100", height: "100", class: "annotation-focus-dim", mask: `url(#${id})` }));
+  return group;
 }
 
 function highlightAnnotation(annotationId) {
@@ -1630,19 +2198,28 @@ function isSupportedAnnotation(annotation) {
 }
 
 function normalizeAnnotation(annotation) {
+  const timestamp = Number(annotation.updatedAt || annotation.createdAt || Date.now());
   return {
     ...annotation,
     color: annotation.color || defaultAnnotationColor,
+    createdAt: Number(annotation.createdAt || timestamp),
+    updatedAt: timestamp,
+    arrowAnchor: annotation.arrowAnchor || (Number.isFinite(annotation.arrowX) && Number.isFinite(annotation.arrowY) ? "top" : undefined),
+    arrowWidth: annotation.arrowWidth || 0.75,
   };
 }
 
 function saveAnnotations() {
-  const snapshot = annotations.filter((annotation) => !annotation.draft && (annotation.text?.trim() || hasReferenceImages(annotation)));
+  const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
   try {
     localStorage.setItem(lastDocumentKey, currentDocumentKey);
     localStorage.setItem(`${storagePrefix}${currentDocumentKey}`, JSON.stringify(snapshot));
   } catch {}
   storeAnnotationSnapshot(currentDocumentKey, snapshot).catch(() => {});
+}
+
+function isPersistableAnnotation(annotation) {
+  return getAnnotationIntent(annotation) === "deleteContent" || annotation.text?.trim() || hasReferenceImages(annotation);
 }
 
 async function loadFixtureFromQuery() {
