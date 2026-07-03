@@ -1,4 +1,4 @@
-import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
+﻿import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
 
 const app = document.querySelector(".app");
 const canvasViewport = document.querySelector("#canvasViewport");
@@ -69,6 +69,16 @@ const translations = {
     panelTitle: "\u6587\u4ef6",
     docSubtitle: "",
     share: "\u5bfc\u51fa",
+    exportHtml: "\u5bfc\u51fa\u7f51\u9875",
+    exportHtmlTitle: "\u5bfc\u51fa\u7f51\u9875",
+    exportHtmlHint: "\u9884\u89c8\u5bfc\u51fa\u9875\u9762\uff0c\u786e\u8ba4\u540e\u4e0b\u8f7d HTML \u6587\u4ef6\u3002",
+    downloadHtml: "\u4e0b\u8f7d HTML",
+    exportImage: "\u5bfc\u51fa\u56fe\u7247",
+    exportImageTitle: "\u5bfc\u51fa\u56fe\u7247",
+    exportImageHint: "\u70b9\u51fb\u9884\u89c8\u6216\u6309\u94ae\u4e0b\u8f7d\u5230\u672c\u5730\u3002",
+    exportImageEmpty: "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u9875\u9762",
+    downloadImage: "\u4e0b\u8f7d\u56fe\u7247",
+    closePreview: "\u5173\u95ed\u9884\u89c8",
     copied: "\u5bfc\u51fa\u529f\u80fd\u5f85\u6dfb\u52a0",
     ready: "\u5df2\u5c31\u7eea",
     comments: "\u6279\u6ce8",
@@ -134,6 +144,16 @@ const translations = {
     panelTitle: "Files",
     docSubtitle: "",
     share: "Export",
+    exportHtml: "Export page",
+    exportHtmlTitle: "Export page",
+    exportHtmlHint: "Preview the export page, then download the HTML file.",
+    downloadHtml: "Download HTML",
+    exportImage: "Export image",
+    exportImageTitle: "Export image",
+    exportImageHint: "Click a preview or button to download it locally.",
+    exportImageEmpty: "No page available to export",
+    downloadImage: "Download image",
+    closePreview: "Close preview",
     copied: "Export coming soon",
     ready: "Ready",
     comments: "Comments",
@@ -706,15 +726,24 @@ commentList.addEventListener("mouseout", (event) => {
   setLinkedCommentActive(comment.dataset.annotationId, false);
 });
 
-shareBtn.addEventListener("click", async () => {
-  setShareText(currentLanguage === "zh" ? "\u751f\u6210\u4e2d" : "Exporting");
-  try {
-    await exportStaticBoard();
-    setShareText(currentLanguage === "zh" ? "\u5df2\u5bfc\u51fa" : "Exported");
-  } catch {
-    setShareText(currentLanguage === "zh" ? "\u5bfc\u51fa\u5931\u8d25" : "Export failed");
+shareBtn.setAttribute("aria-haspopup", "menu");
+shareBtn.setAttribute("aria-expanded", "false");
+shareBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleExportMenu();
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".export-menu, #shareBtn")) return;
+  hideExportMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    hideExportMenu();
+    closeExportImagePreview();
+    closeStaticBoardPreview();
   }
-  setTimeout(() => setShareText(t("share")), 1400);
 });
 
 window.addEventListener("resize", () => {
@@ -1634,6 +1663,66 @@ function renderLucideIcons() {
 
 function setShareText(text) {
   shareText.textContent = text;
+}
+
+function getExportMenu() {
+  let menu = document.querySelector(".export-menu");
+  if (menu) return menu;
+
+  menu = document.createElement("div");
+  menu.className = "export-menu";
+  menu.setAttribute("role", "menu");
+  document.body.append(menu);
+  return menu;
+}
+
+function toggleExportMenu() {
+  const menu = getExportMenu();
+  const open = !menu.classList.contains("open");
+  if (!open) {
+    hideExportMenu();
+    return;
+  }
+
+  menu.replaceChildren(
+    createExportMenuItem("file-code", t("exportHtml"), runStaticExport),
+    createExportMenuItem("image", t("exportImage"), openExportImagePreview),
+  );
+  const rect = shareBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 8}px`;
+  menu.style.left = `${Math.max(8, rect.right - 176)}px`;
+  menu.classList.add("open");
+  shareBtn.setAttribute("aria-expanded", "true");
+  renderLucideIcons();
+}
+
+function hideExportMenu() {
+  const menu = document.querySelector(".export-menu");
+  menu?.classList.remove("open");
+  shareBtn.setAttribute("aria-expanded", "false");
+}
+
+function createExportMenuItem(icon, label, action) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.setAttribute("role", "menuitem");
+  item.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`;
+  item.addEventListener("click", async () => {
+    hideExportMenu();
+    await action();
+  });
+  return item;
+}
+
+async function runStaticExport() {
+  setShareText(currentLanguage === "zh" ? "\u751f\u6210\u4e2d" : "Exporting");
+  try {
+    await exportStaticBoard();
+    setShareText(currentLanguage === "zh" ? "\u5df2\u751f\u6210" : "Ready");
+  } catch {
+    setShareText(currentLanguage === "zh" ? "\u5bfc\u51fa\u5931\u8d25" : "Export failed");
+  }
+  setTimeout(() => setShareText(t("share")), 1400);
 }
 
 function getPagePoint(event, page) {
@@ -3356,6 +3445,248 @@ function hideCommentImagePreview() {
   commentImagePreview.classList.remove("open");
 }
 
+async function openExportImagePreview() {
+  const pageItems = createExportImageItems();
+  if (!pageItems.length) {
+    showAnnotationNotice(t("exportImageEmpty"), 2200);
+    return;
+  }
+  await Promise.all(pageItems.map(async (item) => {
+    item.exportImage = await createExportDownloadImage(item);
+  }));
+
+  closeExportImagePreview();
+  const overlay = document.createElement("div");
+  overlay.className = "export-image-overlay open";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", t("exportImageTitle"));
+
+  const panel = document.createElement("div");
+  panel.className = "export-image-panel";
+  const header = document.createElement("header");
+  header.className = "export-image-head";
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = t("exportImageTitle");
+  const hint = document.createElement("span");
+  hint.textContent = t("exportImageHint");
+  titleWrap.append(title, hint);
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "export-image-close";
+  closeButton.title = t("closePreview");
+  closeButton.setAttribute("aria-label", t("closePreview"));
+  closeButton.append(createIconPlaceholder("x"));
+  closeButton.addEventListener("click", closeExportImagePreview);
+  header.append(titleWrap, closeButton);
+
+  const list = document.createElement("div");
+  list.className = "export-image-list";
+  pageItems.forEach((item) => list.append(createExportImageCard(item)));
+  panel.append(header, list);
+  overlay.append(panel);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeExportImagePreview();
+  });
+  document.body.append(overlay);
+  renderLucideIcons();
+}
+
+function closeExportImagePreview() {
+  document.querySelector(".export-image-overlay:not(.export-html-overlay)")?.remove();
+}
+
+function createExportImageItems() {
+  const orderMap = getAnnotationOrderMap();
+  return [...pageStack.querySelectorAll(".doc-page")]
+    .map((page) => {
+      const canvas = page.querySelector("canvas");
+      if (!canvas?.width || !canvas?.height) return null;
+      const pageId = page.dataset.pageId;
+      const pageAnnotations = annotations
+        .filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation) && String(annotation.pageId) === String(pageId))
+        .slice()
+        .sort((first, second) => (orderMap.get(first.id) || 0) - (orderMap.get(second.id) || 0))
+        .map((annotation) => ({
+          ...annotation,
+          renderIndex: orderMap.get(annotation.id) || "",
+          color: getAnnotationColor(annotation),
+          intentLabel: getAnnotationIntentLabel(annotation),
+          fallbackText: getAnnotationFallbackText(annotation),
+        }));
+      return {
+        pageId,
+        title: currentLanguage === "zh" ? `第 ${pageId} 页` : `Page ${pageId}`,
+        fileTitle: docTitle.textContent || t("appTitle"),
+        image: createExportPageImage(canvas, pageAnnotations),
+        annotations: pageAnnotations,
+      };
+    })
+    .filter(Boolean);
+}
+
+function createExportImageCard(item) {
+  const card = document.createElement("article");
+  card.className = "export-image-card";
+  card.addEventListener("click", () => downloadExportImage(item));
+
+  const image = document.createElement("img");
+  image.src = item.exportImage || item.image;
+  image.alt = item.title;
+  card.append(image);
+  return card;
+}
+
+function createExportPageImage(sourceCanvas, pageAnnotations) {
+  const output = document.createElement("canvas");
+  output.width = sourceCanvas.width;
+  output.height = sourceCanvas.height;
+  const context = output.getContext("2d");
+  context.drawImage(sourceCanvas, 0, 0);
+  pageAnnotations.forEach((annotation) => drawExportAnnotation(context, output, annotation));
+  return output.toDataURL("image/png");
+}
+
+function drawExportAnnotation(context, canvas, annotation) {
+  const color = annotation.color || getAnnotationColor(annotation);
+  const lineWidth = Math.max(4, Math.round(Math.min(canvas.width, canvas.height) * 0.004));
+  context.save();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineWidth = lineWidth;
+  context.lineJoin = "round";
+
+  if (annotation.type === "mark") {
+    const x = (annotation.x / 100) * canvas.width;
+    const y = (annotation.y / 100) * canvas.height;
+    const width = (annotation.width / 100) * canvas.width;
+    const height = (annotation.height / 100) * canvas.height;
+    context.strokeRect(x, y, width, height);
+    drawExportIndexBadge(context, x, y, annotation.renderIndex, color, canvas);
+  } else {
+    const x = (annotation.x / 100) * canvas.width;
+    const y = (annotation.y / 100) * canvas.height;
+    const radius = Math.max(10, Math.round(Math.min(canvas.width, canvas.height) * 0.012));
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
+    context.lineWidth = Math.max(3, Math.round(radius * 0.22));
+    context.strokeStyle = "#fff";
+    context.stroke();
+    drawExportIndexBadge(context, x, y, annotation.renderIndex, color, canvas);
+  }
+  context.restore();
+}
+
+function drawExportIndexBadge(context, x, y, index, color, canvas) {
+  if (!index) return;
+  const radius = Math.max(14, Math.round(Math.min(canvas.width, canvas.height) * 0.018));
+  const badgeX = clamp(x, radius + 2, canvas.width - radius - 2);
+  const badgeY = clamp(y, radius + 2, canvas.height - radius - 2);
+  context.save();
+  context.fillStyle = color;
+  context.beginPath();
+  context.arc(badgeX, badgeY, radius, 0, Math.PI * 2);
+  context.fill();
+  context.lineWidth = Math.max(3, Math.round(radius * 0.16));
+  context.strokeStyle = "#fff";
+  context.stroke();
+  context.fillStyle = "#fff";
+  context.font = `700 ${Math.round(radius * 1.05)}px Arial, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(String(index), badgeX, badgeY + 1);
+  context.restore();
+}
+
+async function downloadExportImage(item) {
+  const dataUrl = item.exportImage || await createExportDownloadImage(item);
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = `${sanitizeFilename(item.fileTitle || "pointking")}-${item.title}.png`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+async function createExportDownloadImage(item) {
+  const pageImage = await loadImageElement(item.image);
+  const width = pageImage.naturalWidth;
+  const padding = Math.round(width * 0.035);
+  const fontSize = Math.max(24, Math.round(width * 0.023));
+  const lineHeight = Math.round(fontSize * 1.55);
+  const rows = item.annotations.length
+    ? item.annotations.map((annotation) => {
+        const text = `${annotation.renderIndex}. ${annotation.intentLabel}: ${annotation.text || annotation.fallbackText}`;
+        return { annotation, lines: wrapCanvasText(text, width - padding * 2 - fontSize * 2, fontSize) };
+      })
+    : [{ annotation: null, lines: [currentLanguage === "zh" ? "\u672c\u9875\u6682\u65e0\u6279\u6ce8" : "No annotations on this page"] }];
+  const commentHeight = padding * 2 + rows.reduce((total, row) => total + Math.max(lineHeight, row.lines.length * lineHeight) + Math.round(lineHeight * 0.35), 0);
+  const output = document.createElement("canvas");
+  output.width = width;
+  output.height = pageImage.naturalHeight + commentHeight;
+  const context = output.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, output.width, output.height);
+  context.drawImage(pageImage, 0, 0);
+  context.fillStyle = "#f7f8fb";
+  context.fillRect(0, pageImage.naturalHeight, width, commentHeight);
+  context.fillStyle = "#111827";
+  context.font = `600 ${fontSize}px Arial, sans-serif`;
+  let y = pageImage.naturalHeight + padding + fontSize;
+  rows.forEach((row) => {
+    if (row.annotation) {
+      context.fillStyle = row.annotation.color || "#00c2a8";
+      context.beginPath();
+      context.arc(padding + fontSize * 0.55, y - fontSize * 0.34, fontSize * 0.55, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = "#fff";
+      context.font = `700 ${fontSize * 0.72}px Arial, sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(row.annotation.renderIndex || ""), padding + fontSize * 0.55, y - fontSize * 0.34);
+    }
+    context.fillStyle = "#111827";
+    context.font = `500 ${fontSize}px Arial, sans-serif`;
+    context.textAlign = "left";
+    context.textBaseline = "alphabetic";
+    row.lines.forEach((line, lineIndex) => {
+      context.fillText(line, padding + fontSize * 1.7, y + lineIndex * lineHeight);
+    });
+    y += Math.max(lineHeight, row.lines.length * lineHeight) + Math.round(lineHeight * 0.35);
+  });
+  return output.toDataURL("image/png");
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
+}
+
+function wrapCanvasText(text, maxWidth, fontSize) {
+  const probe = document.createElement("canvas").getContext("2d");
+  probe.font = `500 ${fontSize}px Arial, sans-serif`;
+  const chars = Array.from(String(text || ""));
+  const lines = [];
+  let line = "";
+  chars.forEach((char) => {
+    const next = `${line}${char}`;
+    if (line && probe.measureText(next).width > maxWidth) {
+      lines.push(line);
+      line = char;
+    } else {
+      line = next;
+    }
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
 async function exportStaticBoard() {
   const pages = [...pageStack.querySelectorAll(".doc-page")]
     .map((page) => {
@@ -3370,10 +3701,12 @@ async function exportStaticBoard() {
     })
     .filter(Boolean);
 
+  const orderMap = getAnnotationOrderMap();
   const exportedAnnotations = annotations
     .filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation))
     .map((annotation) => ({
       ...annotation,
+      renderIndex: orderMap.get(annotation.id) || "",
       color: getAnnotationColor(annotation),
       intentLabel: getAnnotationIntentLabel(annotation),
       fallbackText: getAnnotationFallbackText(annotation),
@@ -3382,13 +3715,194 @@ async function exportStaticBoard() {
 
   const payload = {
     title: docTitle.textContent || t("appTitle"),
-    subtitle: docSubtitle.textContent || "",
+    subtitle: statusFileMeta?.textContent || "",
     exportedAt: new Date().toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en"),
     pages,
     annotations: exportedAnnotations,
   };
 
   const html = createStaticBoardHtml(payload);
+  openStaticBoardPreview(payload, html);
+}
+
+function openStaticBoardPreview(payload, html) {
+  closeStaticBoardPreview();
+  const overlay = document.createElement("div");
+  overlay.className = "export-image-overlay export-html-overlay open";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", t("exportHtmlTitle"));
+
+  const panel = document.createElement("div");
+  panel.className = "export-image-panel export-html-panel";
+  const header = document.createElement("header");
+  header.className = "export-image-head";
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = t("exportHtmlTitle");
+  const hint = document.createElement("span");
+  hint.textContent = t("exportHtmlHint");
+  titleWrap.append(title, hint);
+
+  const actions = document.createElement("div");
+  actions.className = "export-preview-actions";
+  const download = document.createElement("button");
+  download.type = "button";
+  download.className = "export-preview-download";
+  download.append(createIconPlaceholder("download"), document.createTextNode(t("downloadHtml")));
+  download.addEventListener("click", () => downloadStaticBoardHtml(payload, html));
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "export-image-close";
+  closeButton.title = t("closePreview");
+  closeButton.setAttribute("aria-label", t("closePreview"));
+  closeButton.append(createIconPlaceholder("x"));
+  closeButton.addEventListener("click", closeStaticBoardPreview);
+  actions.append(download, closeButton);
+  header.append(titleWrap, actions);
+
+  panel.append(header, createStaticBoardPreview(payload));
+  overlay.append(panel);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) closeStaticBoardPreview();
+  });
+  document.body.append(overlay);
+  renderLucideIcons();
+}
+
+function closeStaticBoardPreview() {
+  document.querySelector(".export-html-overlay")?.remove();
+}
+
+function createStaticBoardPreview(payload) {
+  const preview = document.createElement("div");
+  preview.className = "export-html-preview";
+
+  const stage = document.createElement("div");
+  stage.className = "export-html-stage";
+  const pages = document.createElement("div");
+  pages.className = "export-html-pages";
+  payload.pages.forEach((page) => pages.append(createStaticBoardPreviewPage(page, payload.annotations)));
+  stage.append(pages);
+
+  const side = document.createElement("aside");
+  side.className = "export-html-side";
+  const head = document.createElement("div");
+  head.className = "export-html-side-head";
+  const title = document.createElement("strong");
+  title.textContent = `${t("comments")} (${payload.annotations.length})`;
+  const meta = document.createElement("span");
+  meta.textContent = "PointKing";
+  head.append(title, meta);
+  side.append(head);
+
+  const groups = new Map();
+  payload.annotations.forEach((annotation) => {
+    const key = String(annotation.pageId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(annotation);
+  });
+  [...groups.entries()]
+    .sort(([pageA], [pageB]) => Number(pageA) - Number(pageB))
+    .forEach(([pageId, items]) => side.append(createStaticBoardPreviewCommentGroup(pageId, items)));
+
+  preview.append(stage, side);
+  return preview;
+}
+
+function createStaticBoardPreviewPage(page, annotationsForAllPages) {
+  const frame = document.createElement("section");
+  frame.className = "export-html-page";
+  frame.style.aspectRatio = `${page.width} / ${page.height}`;
+  frame.dataset.pageId = page.id;
+
+  const badge = document.createElement("span");
+  badge.className = "export-html-page-badge";
+  badge.textContent = currentLanguage === "zh" ? `第 ${page.id} 页` : `Page ${page.id}`;
+  const image = document.createElement("img");
+  image.src = page.image;
+  image.alt = badge.textContent;
+  frame.append(badge, image);
+
+  annotationsForAllPages
+    .filter((annotation) => String(annotation.pageId) === String(page.id))
+    .forEach((annotation) => frame.append(createStaticBoardPreviewAnnotation(annotation)));
+  return frame;
+}
+
+function createStaticBoardPreviewAnnotation(annotation) {
+  const color = annotation.color || getAnnotationColor(annotation);
+  const element = document.createElement("div");
+  element.className = annotation.type === "mark" ? "export-html-mark" : "export-html-dot-wrap";
+  element.dataset.annotationId = annotation.id;
+  element.style.setProperty("--annotation-color", color);
+  element.style.left = `${annotation.x}%`;
+  element.style.top = `${annotation.y}%`;
+
+  if (annotation.type === "mark") {
+    element.style.width = `${annotation.width}%`;
+    element.style.height = `${annotation.height}%`;
+    if (annotation.intent === "deleteContent") element.classList.add("delete");
+  } else {
+    const dot = document.createElement("span");
+    dot.className = "export-html-dot";
+    element.append(dot);
+  }
+
+  const index = document.createElement("span");
+  index.className = "export-html-index";
+  index.textContent = String(annotation.renderIndex || "");
+  element.append(index);
+  return element;
+}
+
+function createStaticBoardPreviewCommentGroup(pageId, annotationsForPage) {
+  const group = document.createElement("section");
+  group.className = "export-html-comment-group";
+  const header = document.createElement("div");
+  header.className = "export-html-comment-group-head";
+  const label = document.createElement("span");
+  label.textContent = currentLanguage === "zh" ? `第 ${pageId} 页` : `Page ${pageId}`;
+  const count = document.createElement("span");
+  count.textContent = String(annotationsForPage.length);
+  header.append(label, count);
+  group.append(header);
+
+  annotationsForPage
+    .slice()
+    .sort((first, second) => Number(first.renderIndex || 0) - Number(second.renderIndex || 0))
+    .forEach((annotation) => group.append(createStaticBoardPreviewComment(annotation)));
+  return group;
+}
+
+function createStaticBoardPreviewComment(annotation) {
+  const card = document.createElement("article");
+  card.className = "export-html-comment";
+  card.style.setProperty("--annotation-color", annotation.color || getAnnotationColor(annotation));
+  const index = document.createElement("span");
+  index.className = "export-html-comment-index";
+  index.textContent = String(annotation.renderIndex || "");
+  const title = document.createElement("div");
+  title.className = "export-html-comment-title";
+  const intent = document.createElement("strong");
+  intent.textContent = annotation.intentLabel;
+  const page = document.createElement("span");
+  page.textContent = currentLanguage === "zh" ? `第 ${annotation.pageId} 页` : `Page ${annotation.pageId}`;
+  title.append(intent, page);
+  const text = document.createElement("p");
+  text.textContent = annotation.text || annotation.fallbackText;
+  card.append(index, title, text);
+  if (annotation.regionImage) {
+    const image = document.createElement("img");
+    image.className = "export-html-comment-image";
+    image.src = annotation.regionImage;
+    image.alt = "";
+    card.append(image);
+  }
+  return card;
+}
+
+function downloadStaticBoardHtml(payload, html) {
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -3420,7 +3934,7 @@ function createStaticBoardHtml(payload) {
     <header class="top"><div><h1>${escapeHtml(payload.title)}</h1><div class="meta">${escapeHtml(payload.subtitle)}</div></div><div class="meta">${escapeHtml(payload.exportedAt)}</div></header>
     <section class="pages" id="pages"></section>
   </main>
-  <aside class="side"><div class="side-head"><h2>${currentLanguage === "zh" ? "批注" : "Annotations"}</h2><span class="count" id="count"></span></div><div id="comments"></div></aside>
+  <aside class="side"><div class="side-head"><h2>${currentLanguage === "zh" ? "鎵规敞" : "Annotations"}</h2><span class="count" id="count"></span></div><div id="comments"></div></aside>
 </div>
 <div class="preview" id="preview"><img alt=""></div>
 <script>
@@ -3428,10 +3942,10 @@ const data=${json};
 const pages=document.querySelector("#pages"),comments=document.querySelector("#comments"),count=document.querySelector("#count"),preview=document.querySelector("#preview"),previewImg=preview.querySelector("img");
 const byPage=new Map(data.pages.map(p=>[String(p.id),p]));
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
-function label(a){return a.intentLabel+" · "+(document.documentElement.lang.startsWith("zh")?"第 "+a.pageId+" 页":"Page "+a.pageId)}
+function label(a){return a.intentLabel+" 路 "+(document.documentElement.lang.startsWith("zh")?"绗?"+a.pageId+" 椤?:"Page "+a.pageId)}
 data.pages.forEach(p=>{const el=document.createElement("section");el.className="page";el.id="page-"+p.id;el.style.aspectRatio=p.width+"/"+p.height;el.innerHTML='<span class="badge">Page '+esc(p.id)+'</span><img src="'+p.image+'" alt="Page '+esc(p.id)+'">';pages.append(el)});
 data.annotations.forEach(a=>{const page=document.querySelector("#page-"+CSS.escape(String(a.pageId)));if(!page)return;const c=a.color||"#6e7cff";if(a.type==="mark"){const el=document.createElement("div");el.className="mark "+(a.intent==="deleteContent"?"delete":"");el.style.cssText="--c:"+c+";left:"+a.x+"%;top:"+a.y+"%;width:"+a.width+"%;height:"+a.height+"%";el.dataset.id=a.id;el.innerHTML='<div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(el)}else{const wrap=document.createElement("div");wrap.className="dot-wrap";wrap.style.cssText="left:"+a.x+"%;top:"+a.y+"%";wrap.dataset.id=a.id;wrap.innerHTML='<span class="dot" style="--c:'+c+'"></span><div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(wrap)}if(Number.isFinite(a.arrowX)&&Number.isFinite(a.arrowY)){const start=a.arrowAnchor==="right"?[a.x+a.width,a.y+a.height/2]:a.arrowAnchor==="bottom"?[a.x+a.width/2,a.y+a.height]:a.arrowAnchor==="left"?[a.x,a.y+a.height/2]:[a.x+a.width/2,a.y];const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.classList.add("arrow");svg.style.setProperty("--c",c);svg.style.setProperty("--w",(a.arrowWidth||.75)+"px");svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("preserveAspectRatio","none");svg.innerHTML='<defs><marker id="m-'+a.id+'" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="currentColor"/></marker></defs><line x1="'+start[0]+'" y1="'+start[1]+'" x2="'+a.arrowX+'" y2="'+a.arrowY+'" marker-end="url(#m-'+a.id+')"/>';page.append(svg)}});
-const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"第 "+esc(pageId)+" 页":"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0)).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">PK</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
+const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"绗?"+esc(pageId)+" 椤?:"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0)).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">PK</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
 comments.addEventListener("click",e=>{const card=e.target.closest(".card");if(!card)return;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");const mark=document.querySelector('[data-id="'+CSS.escape(card.dataset.id)+'"]');mark?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"})});
 document.addEventListener("mouseover",e=>{const img=e.target.closest(".thumb,.refs img");if(!img)return;previewImg.src=img.src;preview.classList.add("open")});
 document.addEventListener("mousemove",e=>{if(!preview.classList.contains("open"))return;preview.style.left=Math.min(innerWidth-540,e.clientX+14)+"px";preview.style.top=Math.max(12,Math.min(innerHeight-360,e.clientY+14))+"px"});
