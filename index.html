@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PointKing</title>
     <link rel="icon" type="image/svg+xml" href="./assets/pointking-icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260704-export-html-link" />
+    <link rel="stylesheet" href="./styles.css?v=20260704-mobile-input-zoom" />
   </head>
   <body>
+    <input id="fileInput" class="visually-hidden-file" type="file" accept="application/pdf,image/png,image/jpeg" />
     <div class="app">
       <aside class="rail" aria-label="Workspace">
         <div class="brand">
@@ -18,17 +19,22 @@
           </div>
         </div>
 
-        <label class="dropzone" id="dropzone">
-          <input id="fileInput" type="file" accept="application/pdf,image/png,image/jpeg" />
-          <span class="drop-icon" aria-hidden="true">
-            <i data-lucide="upload-cloud"></i>
-          </span>
-          <strong id="dropTitle">&#25302;&#20837;&#25991;&#20214;</strong>
-          <small>PDF, PNG, JPG</small>
-        </label>
+        <div class="dropzone document-preview" id="dropzone" aria-live="polite">
+          <div class="document-preview-frame" id="railPreviewFrame">
+            <img id="railPreviewImage" alt="" />
+            <span class="document-preview-empty" id="railPreviewEmpty">
+              <i data-lucide="file"></i>
+            </span>
+          </div>
+          <strong id="dropTitle">&#24403;&#21069;&#25991;&#20214;</strong>
+          <small id="railPreviewMeta">PointKing</small>
+        </div>
 
         <section class="panel">
-          <div class="panel-title" id="panelTitle">&#25991;&#20214;</div>
+          <div class="panel-head">
+            <div class="panel-title" id="panelTitle">&#25991;&#20214;</div>
+            <button class="new-document-btn panel-new-document-btn" id="newDocumentBtn" type="button">&#26032;&#24314;</button>
+          </div>
           <div class="file-list" id="documentList">
             <div class="file-empty">
               <span id="fileName">&#26410;&#36873;&#25321;&#25991;&#20214;</span>
@@ -83,11 +89,8 @@
               <i data-lucide="file-up"></i>
               <span id="mobileFileText">&#36873;&#25321;&#25991;&#20214;</span>
             </button>
-            <button class="new-document-btn" id="newDocumentBtn" type="button">&#26032;&#24314;</button>
             <button class="primary" id="shareBtn">
-              <i data-lucide="download"></i>
               <span id="shareText">&#23548;&#20986;</span>
-              <i data-lucide="chevron-down"></i>
             </button>
           </div>
         </header>
@@ -166,7 +169,7 @@
       </div>
     </div>
 
-    <script src="./vendor/lucide/lucide.min.js?v=20260704-export-html-link"></script>
-    <script src="./script.js?v=20260704-export-html-link" type="module"></script>
+    <script src="./vendor/lucide/lucide.min.js?v=20260704-mobile-input-zoom"></script>
+    <script src="./script.js?v=20260704-mobile-input-zoom" type="module"></script>
   </body>
 </html>

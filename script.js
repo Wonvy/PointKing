@@ -11,6 +11,9 @@ const leftCollapseBtn = document.querySelector("#leftCollapseBtn");
 const rightCollapseBtn = document.querySelector("#rightCollapseBtn");
 const fileInput = document.querySelector("#fileInput");
 const dropzone = document.querySelector("#dropzone");
+const railPreviewImage = document.querySelector("#railPreviewImage");
+const railPreviewEmpty = document.querySelector("#railPreviewEmpty");
+const railPreviewMeta = document.querySelector("#railPreviewMeta");
 const docTitle = document.querySelector("#docTitle");
 const documentList = document.querySelector("#documentList");
 const fileName = document.querySelector("#fileName");
@@ -61,7 +64,7 @@ const translations = {
   zh: {
     appTitle: "PointKing",
     brandSub: "",
-    dropTitle: "\u62d6\u5165\u6587\u4ef6",
+    dropTitle: "\u5f53\u524d\u6587\u4ef6",
     chooseFile: "\u9009\u62e9\u6587\u4ef6",
     newDocument: "\u65b0\u5efa",
     blankDocument: "\u65b0\u5efa\u753b\u5e03",
@@ -136,7 +139,7 @@ const translations = {
   en: {
     appTitle: "PointKing",
     brandSub: "",
-    dropTitle: "Drop file",
+    dropTitle: "Current file",
     chooseFile: "Choose file",
     newDocument: "New",
     blankDocument: "New board",
@@ -364,26 +367,21 @@ document.addEventListener("keyup", (event) => {
   canvasViewport.classList.remove("space-panning");
 });
 
-dropzone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  dropzone.classList.add("dragging");
-});
-
-dropzone.addEventListener("dragleave", () => {
-  dropzone.classList.remove("dragging");
-});
-
-dropzone.addEventListener("drop", (event) => {
-  event.preventDefault();
-  dropzone.classList.remove("dragging");
-  const [file] = event.dataTransfer.files;
-  if (file) loadFile(file);
-});
-
 fileInput.addEventListener("change", (event) => {
   const [file] = event.target.files;
   if (file) loadFile(file);
 });
+
+dropzone.addEventListener("pointerenter", (event) => {
+  const thumbnail = railPreviewImage?.dataset.previewSrc;
+  if (thumbnail) queueCommentImagePreview(thumbnail, event.currentTarget);
+});
+
+dropzone.addEventListener("pointermove", () => {
+  if (railPreviewImage?.dataset.previewSrc) positionCommentImagePreview(dropzone);
+});
+
+dropzone.addEventListener("pointerleave", hideCommentImagePreview);
 
 document.addEventListener("paste", (event) => {
   if (isEditableTarget(event.target) || event.target.closest?.(".annotation-editor")) return;
@@ -457,7 +455,8 @@ canvasViewport.addEventListener(
 );
 
 canvasViewport.addEventListener("pointerdown", (event) => {
-  if (event.target.closest(".annotation-ui")) return;
+  const isMiddleButton = event.button === 1;
+  if (event.target.closest(".annotation-ui") && !isMiddleButton) return;
   if (isMobileLayout()) event.preventDefault();
 
   activeCanvasPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
@@ -472,7 +471,7 @@ canvasViewport.addEventListener("pointerdown", (event) => {
   const page = event.target.closest(".doc-page");
   activePointer = event.pointerId;
 
-  if (spacePanActive || !page || event.button === 1 || event.altKey || event.shiftKey) {
+  if (spacePanActive || !page || isMiddleButton || event.altKey || event.shiftKey) {
     event.preventDefault();
     beginPan(event);
     return;
@@ -624,7 +623,7 @@ canvasViewport.addEventListener("pointerup", (event) => {
   if (distance > 2) {
     dragPreview.preview = false;
     dragPreview.width = Math.max(4, dragPreview.width);
-    dragPreview.height = Math.max(3, dragPreview.height);
+    dragPreview.height = Math.max(0, dragPreview.height);
     renderAnnotations();
     focusAnnotationInput(dragPreview.id);
   } else if (!isMobileLayout()) {
@@ -768,6 +767,7 @@ function t(key, values = {}) {
 function applyLanguage() {
   document.documentElement.lang = currentLanguage === "zh" ? "zh-CN" : "en";
   document.title = t("appTitle");
+  docTitle.textContent = t("appTitle");
   brandName.textContent = t("appTitle");
   brandSub.textContent = t("brandSub");
   dropTitle.textContent = t("dropTitle");
@@ -800,6 +800,7 @@ function setFileMetaText(text) {
   const nextText = text || "";
   fileMeta.textContent = nextText;
   if (statusFileMeta) statusFileMeta.textContent = nextText;
+  syncRailDocumentPreview();
 }
 
 function applyTheme() {
@@ -1178,7 +1179,7 @@ function moveEmptyDraftAnnotationToPointer(event, page) {
 
   if (annotation.type === "mark" && Number.isFinite(annotation.width) && Number.isFinite(annotation.height)) {
     annotation.width = Math.max(4, annotation.width || 18);
-    annotation.height = Math.max(3, annotation.height || 12);
+    annotation.height = Math.max(0, annotation.height || 0);
     annotation.x = clamp(point.x - annotation.width / 2, 0, 100 - annotation.width);
     annotation.y = clamp(point.y - annotation.height / 2, 0, 100 - annotation.height);
   } else {
@@ -2946,6 +2947,7 @@ function hasReferenceImages(annotation) {
 
 function bindMarkMove(box, annotation) {
   box.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
     if (event.target.closest(".annotation-editor, .resize-corner, .arrow-anchor")) return;
     if (event.detail > 1) return;
 
@@ -3032,6 +3034,7 @@ function bindAnnotationHover(element, annotation) {
 
 function bindAnnotationArrow(handle, annotation, side) {
   handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -3104,6 +3107,7 @@ function bindAnnotationArrowEdit(arrow, annotation) {
     );
 
     target.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
 
@@ -3147,6 +3151,7 @@ function bindAnnotationArrowEdit(arrow, annotation) {
 
 function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
   handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -3167,7 +3172,7 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
       updateAnnotationOperationMagnifier(moveEvent);
       if (corner === "top-left") {
         const nextX = clamp(startX + next.x - start.x, 0, fixedRight - 4);
-        const nextY = clamp(startY + next.y - start.y, 0, fixedBottom - 3);
+        const nextY = clamp(startY + next.y - start.y, 0, fixedBottom);
         annotation.x = nextX;
         annotation.y = nextY;
         annotation.width = fixedRight - nextX;
@@ -3176,7 +3181,7 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
         box.style.top = `${annotation.y}%`;
       } else {
         annotation.width = clamp(startWidth + next.x - start.x, 4, 100 - annotation.x);
-        annotation.height = clamp(startHeight + next.y - start.y, 3, 100 - annotation.y);
+        annotation.height = clamp(startHeight + next.y - start.y, 0, 100 - annotation.y);
       }
       box.style.width = `${annotation.width}%`;
       box.style.height = `${annotation.height}%`;
@@ -3518,7 +3523,7 @@ function createExportImageItems() {
       return {
         pageId,
         title: currentLanguage === "zh" ? `第 ${pageId} 页` : `Page ${pageId}`,
-        fileTitle: docTitle.textContent || t("appTitle"),
+        fileTitle: statusFileName.textContent || t("appTitle"),
         image: createExportPageImage(canvas, pageAnnotations),
         annotations: pageAnnotations,
       };
@@ -3714,7 +3719,7 @@ async function exportStaticBoard() {
     }));
 
   const payload = {
-    title: docTitle.textContent || t("appTitle"),
+    title: statusFileName.textContent || t("appTitle"),
     subtitle: statusFileMeta?.textContent || "",
     exportedAt: new Date().toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en"),
     pages,
@@ -3789,12 +3794,32 @@ function createStaticBoardPreview(payload) {
   side.className = "export-html-side";
   const head = document.createElement("div");
   head.className = "export-html-side-head";
+  const titleRow = document.createElement("div");
+  titleRow.className = "export-html-side-title";
   const title = document.createElement("strong");
   title.textContent = `${t("comments")} (${payload.annotations.length})`;
   const meta = document.createElement("span");
   meta.textContent = "PointKing";
-  head.append(title, meta);
+  titleRow.append(title, meta);
+  const filters = document.createElement("div");
+  filters.className = "export-html-side-filters";
+  [
+    ["all", t("filterAll")],
+    ["suggestion", t("suggestionTab")],
+    ["editText", t("editTextTab")],
+    ["deleteContent", t("deleteTab")],
+  ].forEach(([value, label], index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `export-html-filter${index === 0 ? " active" : ""}`;
+    button.dataset.filter = value;
+    button.textContent = label;
+    filters.append(button);
+  });
+  head.append(titleRow, filters);
   side.append(head);
+  const list = document.createElement("div");
+  list.className = "export-html-comment-list";
 
   const groups = new Map();
   payload.annotations.forEach((annotation) => {
@@ -3804,10 +3829,12 @@ function createStaticBoardPreview(payload) {
   });
   [...groups.entries()]
     .sort(([pageA], [pageB]) => Number(pageA) - Number(pageB))
-    .forEach(([pageId, items]) => side.append(createStaticBoardPreviewCommentGroup(pageId, items)));
+    .forEach(([pageId, items]) => list.append(createStaticBoardPreviewCommentGroup(pageId, items)));
 
+  side.append(list);
   preview.append(stage, side);
   bindStaticBoardPreviewLinks(preview);
+  bindStaticBoardPreviewFilters(preview);
   return preview;
 }
 
@@ -3880,6 +3907,7 @@ function createStaticBoardPreviewComment(annotation) {
   const card = document.createElement("article");
   card.className = "export-html-comment";
   card.dataset.annotationId = annotation.id;
+  card.dataset.intent = getAnnotationIntent(annotation);
   card.style.setProperty("--annotation-color", annotation.color || getAnnotationColor(annotation));
   const index = document.createElement("span");
   index.className = "export-html-comment-index";
@@ -3907,6 +3935,7 @@ function createStaticBoardPreviewComment(annotation) {
 function bindStaticBoardPreviewLinks(preview) {
   const setActive = (annotationId, active) => {
     if (!annotationId) return;
+    preview.classList.toggle("mask-active", active);
     preview.querySelectorAll(`[data-annotation-id="${CSS.escape(annotationId)}"]`).forEach((item) => {
       item.classList.toggle("active", active);
     });
@@ -3933,6 +3962,23 @@ function bindStaticBoardPreviewLinks(preview) {
   });
 }
 
+function bindStaticBoardPreviewFilters(preview) {
+  const applyFilter = (filter) => {
+    preview.querySelectorAll(".export-html-filter").forEach((button) => {
+      button.classList.toggle("active", button.dataset.filter === filter);
+    });
+    preview.querySelectorAll(".export-html-comment").forEach((card) => {
+      card.hidden = filter !== "all" && card.dataset.intent !== filter;
+    });
+    preview.querySelectorAll(".export-html-comment-group").forEach((group) => {
+      group.hidden = !group.querySelector(".export-html-comment:not([hidden])");
+    });
+  };
+  preview.querySelectorAll(".export-html-filter").forEach((button) => {
+    button.addEventListener("click", () => applyFilter(button.dataset.filter || "all"));
+  });
+}
+
 function downloadStaticBoardHtml(payload, html) {
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -3956,7 +4002,7 @@ function createStaticBoardHtml(payload) {
 <style>
 :root{color-scheme:dark;--bg:#08090c;--panel:#101116;--panel-2:#151720;--line:rgba(255,255,255,.1);--text:#f5f5f7;--muted:#8f96a3;--accent:#6e7cff;--danger:#ff6b6b}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:14px}
-.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.pages{display:grid;gap:28px;justify-items:center}.page{position:relative;width:min(920px,100%);background:white;box-shadow:0 20px 60px rgba(0,0,0,.34)}.page>img{display:block;width:100%;height:auto}.badge{position:absolute;left:0;bottom:calc(100% + 5px);padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);font-size:11px;font-weight:700}.mark,.dot,.arrow{position:absolute}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.dot{width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.arrow{inset:0;pointer-events:none;color:var(--c);overflow:visible}.arrow line{stroke:currentColor;stroke-width:var(--w);stroke-linecap:round;vector-effect:non-scaling-stroke}.tooltip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tooltip,.dot-wrap:hover .tooltip{display:block}.dot-wrap{position:absolute}.side{min-width:0;border-left:1px solid var(--line);background:var(--panel);padding:16px;overflow:auto}.side-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:12px}.side h2{margin:0;font-size:14px}.count{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group-title{display:flex;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;padding:10px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.avatar{display:grid;width:28px;height:28px;place-items:center;border-radius:7px;background:color-mix(in srgb,var(--c) 22%,transparent);color:#fff;font-size:11px;font-weight:800}.card strong{display:block;margin-bottom:4px;font-size:12px}.card p{margin:0 0 7px;color:#c7ccd5;font-size:12px;line-height:1.45}.thumb{display:block;width:100%;max-height:96px;object-fit:cover;border:1px solid color-mix(in srgb,var(--c) 56%,var(--line));border-radius:7px;background:#fff}.refs{display:flex;gap:6px;flex-wrap:wrap}.refs img{width:56px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
+.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.pages{display:grid;gap:28px;justify-items:center}.page{position:relative;width:min(920px,100%);background:white;box-shadow:0 20px 60px rgba(0,0,0,.34)}.page::after{content:"";position:absolute;inset:0;z-index:2;background:rgba(3,7,18,.5);opacity:0;pointer-events:none}body.mask-active .page::after{opacity:1}.page>img{display:block;width:100%;height:auto}.badge{position:absolute;left:0;bottom:calc(100% + 5px);padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);font-size:11px;font-weight:700}.mark,.dot,.arrow{position:absolute}.mark,.dot-wrap{z-index:3}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.mark.active,.dot-wrap.active{z-index:4;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c) 62%,transparent))}.mark.active{background:color-mix(in srgb,var(--c) 14%,transparent)}.dot{width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.arrow{inset:0;pointer-events:none;color:var(--c);overflow:visible}.arrow line{stroke:currentColor;stroke-width:var(--w);stroke-linecap:round;vector-effect:non-scaling-stroke}.tooltip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tooltip,.dot-wrap:hover .tooltip{display:block}.dot-wrap{position:absolute}.side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;border-left:1px solid var(--line);background:var(--panel);overflow:hidden}.side-head{position:sticky;top:0;z-index:5;display:grid;gap:10px;border-bottom:1px solid var(--line);background:var(--panel);padding:16px}.side-title{display:flex;align-items:center;justify-content:space-between}.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.filter{height:28px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:12px}.filter.active,.filter:hover{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--text)}.comment-scroll{min-height:0;overflow:auto;padding:16px}.side h2{margin:0;font-size:14px}.count{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group[hidden],.card[hidden]{display:none}.group-title{display:flex;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{position:relative;display:grid;gap:10px;padding:10px 10px 10px 38px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.avatar{position:absolute;left:12px;top:10px;display:grid;width:18px;height:18px;place-items:center;border-radius:999px;background:var(--c);color:#fff;font-size:10px;font-weight:800;line-height:18px}.card strong{display:block;margin-bottom:4px;font-size:12px}.card p{margin:0 0 7px;color:#c7ccd5;font-size:12px;line-height:1.45}.thumb{display:block;width:100%;max-height:96px;object-fit:cover;border:1px solid color-mix(in srgb,var(--c) 56%,var(--line));border-radius:7px;background:#fff}.refs{display:flex;gap:6px;flex-wrap:wrap}.refs img{width:56px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
 </style>
 </head>
 <body>
@@ -3965,7 +4011,7 @@ function createStaticBoardHtml(payload) {
     <header class="top"><div><h1>${escapeHtml(payload.title)}</h1><div class="meta">${escapeHtml(payload.subtitle)}</div></div><div class="meta">${escapeHtml(payload.exportedAt)}</div></header>
     <section class="pages" id="pages"></section>
   </main>
-  <aside class="side"><div class="side-head"><h2>${currentLanguage === "zh" ? "鎵规敞" : "Annotations"}</h2><span class="count" id="count"></span></div><div id="comments"></div></aside>
+  <aside class="side"><div class="side-head"><div class="side-title"><h2>${currentLanguage === "zh" ? "批注" : "Annotations"}</h2><span class="count" id="count"></span></div><div class="filters"><button class="filter active" data-filter="all">${currentLanguage === "zh" ? "全部" : "All"}</button><button class="filter" data-filter="suggestion">${currentLanguage === "zh" ? "建议" : "Suggestion"}</button><button class="filter" data-filter="editText">${currentLanguage === "zh" ? "修改" : "Edit"}</button><button class="filter" data-filter="deleteContent">${currentLanguage === "zh" ? "删除" : "Delete"}</button></div></div><div class="comment-scroll" id="comments"></div></aside>
 </div>
 <div class="preview" id="preview"><img alt=""></div>
 <script>
@@ -3973,11 +4019,15 @@ const data=${json};
 const pages=document.querySelector("#pages"),comments=document.querySelector("#comments"),count=document.querySelector("#count"),preview=document.querySelector("#preview"),previewImg=preview.querySelector("img");
 const byPage=new Map(data.pages.map(p=>[String(p.id),p]));
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
-function label(a){return a.intentLabel+" 路 "+(document.documentElement.lang.startsWith("zh")?"绗?"+a.pageId+" 椤?:"Page "+a.pageId)}
+function label(a){return a.intentLabel+" · "+(document.documentElement.lang.startsWith("zh")?"第 "+a.pageId+" 页":"Page "+a.pageId)}
 data.pages.forEach(p=>{const el=document.createElement("section");el.className="page";el.id="page-"+p.id;el.style.aspectRatio=p.width+"/"+p.height;el.innerHTML='<span class="badge">Page '+esc(p.id)+'</span><img src="'+p.image+'" alt="Page '+esc(p.id)+'">';pages.append(el)});
 data.annotations.forEach(a=>{const page=document.querySelector("#page-"+CSS.escape(String(a.pageId)));if(!page)return;const c=a.color||"#6e7cff";if(a.type==="mark"){const el=document.createElement("div");el.className="mark "+(a.intent==="deleteContent"?"delete":"");el.style.cssText="--c:"+c+";left:"+a.x+"%;top:"+a.y+"%;width:"+a.width+"%;height:"+a.height+"%";el.dataset.id=a.id;el.innerHTML='<div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(el)}else{const wrap=document.createElement("div");wrap.className="dot-wrap";wrap.style.cssText="left:"+a.x+"%;top:"+a.y+"%";wrap.dataset.id=a.id;wrap.innerHTML='<span class="dot" style="--c:'+c+'"></span><div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(wrap)}if(Number.isFinite(a.arrowX)&&Number.isFinite(a.arrowY)){const start=a.arrowAnchor==="right"?[a.x+a.width,a.y+a.height/2]:a.arrowAnchor==="bottom"?[a.x+a.width/2,a.y+a.height]:a.arrowAnchor==="left"?[a.x,a.y+a.height/2]:[a.x+a.width/2,a.y];const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.classList.add("arrow");svg.style.setProperty("--c",c);svg.style.setProperty("--w",(a.arrowWidth||.75)+"px");svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("preserveAspectRatio","none");svg.innerHTML='<defs><marker id="m-'+a.id+'" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="currentColor"/></marker></defs><line x1="'+start[0]+'" y1="'+start[1]+'" x2="'+a.arrowX+'" y2="'+a.arrowY+'" marker-end="url(#m-'+a.id+')"/>';page.append(svg)}});
-const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"绗?"+esc(pageId)+" 椤?:"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(a.updatedAt||0)-(b.updatedAt||0)).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">PK</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
-comments.addEventListener("click",e=>{const card=e.target.closest(".card");if(!card)return;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");const mark=document.querySelector('[data-id="'+CSS.escape(card.dataset.id)+'"]');mark?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"})});
+const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"第 "+esc(pageId)+" 页":"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(Number(a.renderIndex||0))-(Number(b.renderIndex||0))).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">'+esc(a.renderIndex||"")+'</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
+function setActive(id,on){if(!id)return;document.body.classList.toggle("mask-active",on);document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
+document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));
+comments.addEventListener("click",e=>{const card=e.target.closest(".card");if(!card)return;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");const mark=document.querySelector('.page [data-id="'+CSS.escape(card.dataset.id)+'"]');mark?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"})});
+document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,true)});
+document.addEventListener("mouseout",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,false)});
 document.addEventListener("mouseover",e=>{const img=e.target.closest(".thumb,.refs img");if(!img)return;previewImg.src=img.src;preview.classList.add("open")});
 document.addEventListener("mousemove",e=>{if(!preview.classList.contains("open"))return;preview.style.left=Math.min(innerWidth-540,e.clientX+14)+"px";preview.style.top=Math.max(12,Math.min(innerHeight-360,e.clientY+14))+"px"});
 document.addEventListener("mouseout",e=>{if(e.target.closest(".thumb,.refs img"))preview.classList.remove("open")});
@@ -4129,7 +4179,7 @@ async function loadFile(file, options = {}) {
     lastModified: file.lastModified,
     updatedAt: Date.now(),
   });
-  docTitle.textContent = file.name;
+  docTitle.textContent = t("appTitle");
   fileName.textContent = file.name;
   statusFileName.textContent = file.name;
   setFileMetaText(`${formatBytes(file.size)} \u00b7 \u672c\u5730\u9884\u89c8`);
@@ -4425,7 +4475,7 @@ async function initializeDocument() {
 function loadDocumentCatalog() {
   try {
     const catalog = JSON.parse(localStorage.getItem(documentCatalogStorageKey) || "[]");
-    return Array.isArray(catalog) ? catalog.filter((item) => item?.key && item?.name) : [];
+    return Array.isArray(catalog) ? sortDocumentCatalog(catalog.filter((item) => item?.key && item?.name).map(normalizeDocumentRecord)) : [];
   } catch {
     return [];
   }
@@ -4438,17 +4488,20 @@ function saveDocumentCatalog() {
 }
 
 function upsertDocumentRecord(record) {
-  const nextRecord = {
+  const existingIndex = documentCatalog.findIndex((item) => item.key === record.key);
+  const existingRecord = existingIndex >= 0 ? documentCatalog[existingIndex] : null;
+  const nextRecord = normalizeDocumentRecord({
+    ...existingRecord,
     ...record,
+    createdAt: existingRecord?.createdAt || record.createdAt || getDocumentCreatedAt(record) || Date.now(),
     updatedAt: record.updatedAt || Date.now(),
-  };
-  const existingIndex = documentCatalog.findIndex((item) => item.key === nextRecord.key);
+  });
   if (existingIndex >= 0) {
-    documentCatalog[existingIndex] = { ...documentCatalog[existingIndex], ...nextRecord };
+    documentCatalog[existingIndex] = nextRecord;
   } else {
     documentCatalog.unshift(nextRecord);
   }
-  documentCatalog.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  sortDocumentCatalog(documentCatalog);
   saveDocumentCatalog();
   renderDocumentList();
 }
@@ -4456,10 +4509,33 @@ function upsertDocumentRecord(record) {
 function updateDocumentRecord(key, updates) {
   const index = documentCatalog.findIndex((item) => item.key === key);
   if (index < 0) return;
-  documentCatalog[index] = { ...documentCatalog[index], ...updates, updatedAt: Date.now() };
-  documentCatalog.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  documentCatalog[index] = normalizeDocumentRecord({ ...documentCatalog[index], ...updates, updatedAt: Date.now() });
+  sortDocumentCatalog(documentCatalog);
   saveDocumentCatalog();
   renderDocumentList();
+}
+
+function normalizeDocumentRecord(record) {
+  if (record?.kind !== "blank") return record;
+  return {
+    ...record,
+    name: normalizeBlankDocumentName(record.name),
+  };
+}
+
+function normalizeBlankDocumentName(name) {
+  const value = String(name || "").trim();
+  const zhBase = translations.zh.blankDocument;
+  const enBase = translations.en.blankDocument;
+  const timestampSuffixPattern = /(?:\s+\d{1,2}\/\d{1,2}(?:,)?\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)$/i;
+  if (value === zhBase || value === enBase) return value;
+  if (value.startsWith(zhBase) && timestampSuffixPattern.test(value.slice(zhBase.length))) return zhBase;
+  if (value.startsWith(enBase) && timestampSuffixPattern.test(value.slice(enBase.length))) return enBase;
+  return value || t("blankDocument");
+}
+
+function sortDocumentCatalog(catalog = documentCatalog) {
+  return catalog.sort((a, b) => getDocumentCreatedAt(b) - getDocumentCreatedAt(a));
 }
 
 function renderDocumentList() {
@@ -4475,6 +4551,7 @@ function renderDocumentList() {
     }
     fileName.textContent = currentDocumentKey ? docTitle.textContent : "\u672a\u9009\u62e9\u6587\u4ef6";
     setFileMetaText(currentDocumentKey ? fileMeta.textContent : "PDF, PNG, JPG");
+    syncRailDocumentPreview();
     return;
   }
 
@@ -4510,6 +4587,7 @@ function renderDocumentList() {
       event.preventDefault();
       loadDocumentByKey(record.key);
     });
+    attachDocumentPreviewEvents(button, record);
 
     const type = createDocumentThumbnail(record);
 
@@ -4550,6 +4628,8 @@ function renderDocumentList() {
     button.append(type, body, deleteButton);
     documentList.append(button);
   });
+  syncRailDocumentPreview();
+  renderLucideIcons();
 }
 
 function getDocumentTypeLabel(record) {
@@ -4576,8 +4656,51 @@ function createDocumentThumbnail(record) {
     return thumb;
   }
 
+  if (record.kind === "blank") {
+    thumb.classList.add("blank-icon");
+    thumb.append(createIconPlaceholder("file"));
+    return thumb;
+  }
+
   thumb.textContent = getDocumentTypeLabel(record);
   return thumb;
+}
+
+function syncRailDocumentPreview(previewRecord = null) {
+  if (!railPreviewImage || !railPreviewEmpty || !railPreviewMeta) return;
+  const record = previewRecord || documentCatalog.find((item) => item.key === currentDocumentKey);
+  const thumbnail = record?.thumbnail || "";
+  dropzone?.classList.toggle("has-preview", Boolean(thumbnail));
+  dropTitle.textContent = record?.name || t("dropTitle");
+  railPreviewMeta.textContent = record ? getDocumentMetaText(record) : (currentLanguage === "zh" ? "\u6682\u65e0\u6587\u4ef6" : "No file");
+  railPreviewImage.src = thumbnail;
+  railPreviewImage.alt = record?.name || "";
+  railPreviewImage.dataset.previewSrc = thumbnail;
+  railPreviewImage.hidden = !thumbnail;
+  railPreviewEmpty.hidden = Boolean(thumbnail);
+}
+
+function attachDocumentPreviewEvents(element, record) {
+  if (!element || !record) return;
+  element.addEventListener("pointerenter", (event) => {
+    syncRailDocumentPreview(record);
+    if (record.thumbnail) queueCommentImagePreview(record.thumbnail, event.currentTarget);
+  });
+  element.addEventListener("pointermove", (event) => {
+    if (record.thumbnail) positionCommentImagePreview(event.currentTarget);
+  });
+  element.addEventListener("pointerleave", () => {
+    hideCommentImagePreview();
+    syncRailDocumentPreview();
+  });
+  element.addEventListener("focus", (event) => {
+    syncRailDocumentPreview(record);
+    if (record.thumbnail) queueCommentImagePreview(record.thumbnail, event.currentTarget);
+  });
+  element.addEventListener("blur", () => {
+    hideCommentImagePreview();
+    syncRailDocumentPreview();
+  });
 }
 
 function getDocumentMetaText(record) {
@@ -4609,8 +4732,10 @@ function getBlankDocumentMetaText(record = {}, pageCount = record.pageCount, ext
 function getDocumentCreatedAt(record = {}) {
   const explicitTime = Number(record.createdAt || 0);
   if (explicitTime) return explicitTime;
-  const [, keyTime] = String(record.key || "").split(":");
-  const parsedTime = Number(keyTime || 0);
+  const savedTime = Number(record.savedAt || record.updatedAt || record.lastModified || 0);
+  if (savedTime) return savedTime;
+  const [kind, keyTime] = String(record.key || "").split(":");
+  const parsedTime = kind === "blank" ? Number(keyTime || 0) : 0;
   return Number.isFinite(parsedTime) ? parsedTime : 0;
 }
 
@@ -4691,7 +4816,7 @@ function renameDocumentByKey(key) {
       if (!nextName || nextName === record.name) return;
       updateDocumentRecord(key, { name: nextName });
       if (key === currentDocumentKey) {
-        docTitle.textContent = nextName;
+        docTitle.textContent = t("appTitle");
         fileName.textContent = nextName;
         statusFileName.textContent = nextName;
       }
@@ -4821,7 +4946,7 @@ async function createNewBlankDocument() {
     } catch {}
     await storeBlankDocumentRecord({ key, name, createdAt: timestamp });
     upsertDocumentRecord({ key, kind: "blank", name, pageCount: 0, createdAt: timestamp, updatedAt: timestamp });
-    docTitle.textContent = name;
+    docTitle.textContent = t("appTitle");
     fileName.textContent = name;
     statusFileName.textContent = name;
     setFileMetaText(getBlankDocumentMetaText({ key, createdAt: timestamp }, 0));
@@ -4851,7 +4976,7 @@ async function loadDocumentByKey(key, options = {}) {
     try {
       localStorage.setItem(lastDocumentKey, currentDocumentKey);
     } catch {}
-    docTitle.textContent = record.name;
+    docTitle.textContent = t("appTitle");
     fileName.textContent = record.name;
     statusFileName.textContent = record.name;
     const storedPageCount = Number(record.pageCount || 0);
@@ -4874,7 +4999,7 @@ async function loadDocumentByKey(key, options = {}) {
   if (!file) return false;
   await loadFile(file, { store: false });
   updateDocumentRecord(key, { name: record.name });
-  docTitle.textContent = record.name;
+  docTitle.textContent = t("appTitle");
   fileName.textContent = record.name;
   statusFileName.textContent = record.name;
   return true;
@@ -5040,7 +5165,7 @@ async function persistExtraImagePage(file, pageId) {
       const existing = request.result || {
         key: currentDocumentKey,
         kind: "blank",
-        name: docTitle.textContent || t("blankDocument"),
+        name: statusFileName.textContent || t("blankDocument"),
         type: "application/x-pointking-board",
         size: 0,
         extraPages: [],
@@ -5102,7 +5227,7 @@ async function persistDeletedPage(pageId) {
       const existing = request.result || {
         key: currentDocumentKey,
         kind: "blank",
-        name: docTitle.textContent || t("blankDocument"),
+        name: statusFileName.textContent || t("blankDocument"),
         type: "application/x-pointking-board",
         size: 0,
       };

@@ -90,7 +90,7 @@ svg {
 
 .app {
   display: grid;
-  grid-template-columns: var(--left-width) 10px minmax(0, 1fr) 10px var(--right-width);
+  grid-template-columns: var(--left-width) 6px minmax(0, 1fr) 6px var(--right-width);
   width: 100vw;
   height: 100vh;
   height: 100dvh;
@@ -112,16 +112,16 @@ svg {
 
 .app.left-collapsed {
   --left-width: 0px;
-  grid-template-columns: 0 10px minmax(0, 1fr) 10px var(--right-width);
+  grid-template-columns: 0 6px minmax(0, 1fr) 6px var(--right-width);
 }
 
 .app.right-collapsed {
   --right-width: 0px;
-  grid-template-columns: var(--left-width) 10px minmax(0, 1fr) 10px 0;
+  grid-template-columns: var(--left-width) 6px minmax(0, 1fr) 6px 0;
 }
 
 .app.left-collapsed.right-collapsed {
-  grid-template-columns: 0 10px minmax(0, 1fr) 10px 0;
+  grid-template-columns: 0 6px minmax(0, 1fr) 6px 0;
 }
 
 .app.left-collapsed .rail,
@@ -180,7 +180,7 @@ svg {
   top: 50%;
   z-index: 18;
   display: grid;
-  width: 20px;
+  width: 18px;
   height: 34px;
   place-items: center;
   border: 1px solid var(--line);
@@ -194,14 +194,16 @@ svg {
     background 140ms ease,
     border-color 140ms ease,
     color 140ms ease,
+    width 140ms ease,
     transform 140ms ease;
 }
 
 .collapse-toggle:hover {
+  width: 26px;
   border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
   background: color-mix(in srgb, var(--accent) 10%, var(--panel));
   color: var(--text);
-  transform: translateY(-50%) scale(1.04);
+  transform: translateY(-50%);
 }
 
 .collapse-toggle svg {
@@ -210,12 +212,12 @@ svg {
 }
 
 .collapse-toggle-left {
-  right: -20px;
+  left: 50%;
   border-radius: 0 7px 7px 0;
 }
 
 .collapse-toggle-right {
-  left: -15px;
+  right: 50%;
   border-radius: 7px 0 0 7px;
 }
 
@@ -231,6 +233,10 @@ svg {
 .brand {
   gap: 12px;
   margin-bottom: 18px;
+}
+
+.rail > .brand {
+  display: none;
 }
 
 .mark {
@@ -300,6 +306,68 @@ svg {
     transform 160ms ease;
 }
 
+.document-preview {
+  min-height: 178px;
+  cursor: default;
+  padding: 14px;
+}
+
+.document-preview > strong,
+.document-preview > small {
+  display: none;
+}
+
+.dropzone.document-preview::after {
+  display: none;
+}
+
+.document-preview:hover,
+.document-preview:focus-within {
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+  color: var(--soft);
+  box-shadow: none;
+  transform: none;
+}
+
+.document-preview-frame {
+  position: relative;
+  display: grid;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 150px;
+  place-items: center;
+  overflow: hidden;
+}
+
+.document-preview-frame > img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.document-preview-frame > img[hidden],
+.document-preview-empty[hidden] {
+  display: none;
+}
+
+.document-preview-empty {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+
+.document-preview-empty svg {
+  width: 34px;
+  height: 34px;
+  stroke-width: 1.45;
+}
+
 .dropzone::after {
   content: "";
   position: absolute;
@@ -313,6 +381,16 @@ svg {
 
 .dropzone input {
   display: none;
+}
+
+.visually-hidden-file {
+  position: fixed;
+  left: -100vw;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .dropzone:hover,
@@ -383,8 +461,31 @@ svg {
   margin-top: 22px;
 }
 
-.panel-title {
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 10px;
+}
+
+.panel-title {
+  margin-bottom: 0;
+}
+
+.panel-new-document-btn {
+  min-width: 76px;
+  height: 32px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.panel-new-document-btn:hover {
+  filter: brightness(1.06);
 }
 
 .file-list {
@@ -527,6 +628,18 @@ svg {
   height: 100%;
   object-fit: contain;
   border-radius: 0;
+}
+
+.file-type.blank-icon {
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 66%, transparent);
+}
+
+.file-type.blank-icon svg {
+  width: 26px;
+  height: 26px;
+  stroke-width: 1.6;
 }
 
 .workspace {
@@ -683,7 +796,7 @@ svg {
 }
 
 .title-brand-mark {
-  display: none;
+  display: block;
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
@@ -694,10 +807,6 @@ svg {
   width: 100%;
   height: 100%;
   object-fit: contain;
-}
-
-.app.left-collapsed .title-brand-mark {
-  display: block;
 }
 
 .document-title div {
@@ -1011,6 +1120,21 @@ svg {
   background: white;
 }
 
+.export-html-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgba(3, 7, 18, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.export-html-preview.mask-active .export-html-page::after {
+  opacity: 1;
+}
+
 .export-html-page > img {
   display: block;
   width: 100%;
@@ -1035,6 +1159,7 @@ svg {
 .export-html-mark,
 .export-html-dot-wrap {
   position: absolute;
+  z-index: 3;
   --annotation-color: var(--accent);
 }
 
@@ -1049,6 +1174,7 @@ svg {
 
 .export-html-mark.active,
 .export-html-dot-wrap.active {
+  z-index: 4;
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--annotation-color) 62%, transparent));
 }
 
@@ -1084,11 +1210,12 @@ svg {
 }
 
 .export-html-side {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   border-left: 1px solid var(--line);
   background: var(--panel);
-  padding: 16px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .export-html-side-head,
@@ -1101,7 +1228,50 @@ svg {
 }
 
 .export-html-side-head {
-  margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  padding: 16px;
+}
+
+.export-html-side-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.export-html-side-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.export-html-filter {
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.export-html-filter.active,
+.export-html-filter:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+
+.export-html-comment-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
 }
 
 .export-html-side-head strong {
@@ -1139,7 +1309,12 @@ svg {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
-  padding: 12px 10px 10px 30px;
+  padding: 12px 10px 10px 38px;
+}
+
+.export-html-comment[hidden],
+.export-html-comment-group[hidden] {
+  display: none;
 }
 
 .export-html-comment:hover,
@@ -1150,12 +1325,13 @@ svg {
 
 .export-html-comment-index {
   position: absolute;
-  left: 10px;
+  left: 12px;
   top: 12px;
-  display: grid;
+  display: inline-grid;
   width: 18px;
   height: 18px;
   place-items: center;
+  line-height: 18px;
   border-radius: 999px;
   background: var(--annotation-color);
   color: white;
@@ -1217,11 +1393,13 @@ svg {
 }
 
 .primary {
-  gap: 8px;
+  width: 76px;
+  gap: 0;
   border: 0;
-  padding: 0 12px;
+  padding: 0;
   background: var(--accent);
   color: white;
+  font-size: 13px;
   font-weight: 650;
   box-shadow: none;
 }
@@ -1247,6 +1425,24 @@ svg {
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   color: var(--soft);
   font-size: 13px;
+}
+
+.panel-new-document-btn {
+  width: 76px;
+  min-width: 76px;
+  height: 32px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.panel-new-document-btn:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 88%, white);
+  color: #fff;
 }
 
 .new-document-btn:hover {
@@ -2069,7 +2265,7 @@ html[data-theme="light"] .placeholder {
 
 .mark-box {
   min-width: 28px;
-  min-height: 22px;
+  min-height: 0;
   border: 2px solid var(--annotation-color, var(--accent));
   border-radius: 0;
   background: transparent;
@@ -2400,9 +2596,11 @@ html[data-theme="light"] .placeholder {
   position: absolute;
   right: 5px;
   bottom: 5px;
+  z-index: 4;
   display: inline-flex;
   align-items: flex-end;
   gap: 5px;
+  pointer-events: auto;
 }
 
 .inline-reference-list {
@@ -2535,6 +2733,11 @@ html[data-theme="light"] .placeholder {
   opacity: 1;
   pointer-events: auto;
   transform: scale(1);
+}
+
+.save-annotation-group.visible .save-annotation,
+.save-annotation-group.visible .save-shortcut-toggle {
+  pointer-events: auto;
 }
 
 .save-annotation-group .save-annotation {
@@ -3627,6 +3830,12 @@ html[data-theme="light"] .comment.active {
     accent-color: var(--accent);
   }
 
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
   .mobile-annotation-dock .annotation-editor {
     position: relative;
     width: 100%;
@@ -3676,6 +3885,13 @@ html[data-theme="light"] .comment.active {
     height: 30px;
     padding: 0 4px;
     font-size: 11px;
+  }
+
+  .mobile-annotation-dock .mark-input,
+  .mobile-annotation-dock .text-input,
+  .mobile-annotation-dock .inline-reference-list {
+    font-size: 16px;
+    line-height: 1.35;
   }
 
   .mobile-annotation-dock .save-annotation {
