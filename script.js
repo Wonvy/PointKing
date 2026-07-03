@@ -3807,6 +3807,7 @@ function createStaticBoardPreview(payload) {
     .forEach(([pageId, items]) => side.append(createStaticBoardPreviewCommentGroup(pageId, items)));
 
   preview.append(stage, side);
+  bindStaticBoardPreviewLinks(preview);
   return preview;
 }
 
@@ -3878,6 +3879,7 @@ function createStaticBoardPreviewCommentGroup(pageId, annotationsForPage) {
 function createStaticBoardPreviewComment(annotation) {
   const card = document.createElement("article");
   card.className = "export-html-comment";
+  card.dataset.annotationId = annotation.id;
   card.style.setProperty("--annotation-color", annotation.color || getAnnotationColor(annotation));
   const index = document.createElement("span");
   index.className = "export-html-comment-index";
@@ -3900,6 +3902,35 @@ function createStaticBoardPreviewComment(annotation) {
     card.append(image);
   }
   return card;
+}
+
+function bindStaticBoardPreviewLinks(preview) {
+  const setActive = (annotationId, active) => {
+    if (!annotationId) return;
+    preview.querySelectorAll(`[data-annotation-id="${CSS.escape(annotationId)}"]`).forEach((item) => {
+      item.classList.toggle("active", active);
+    });
+  };
+
+  preview.addEventListener("pointerover", (event) => {
+    const target = event.target.closest("[data-annotation-id]");
+    if (!target || !preview.contains(target)) return;
+    setActive(target.dataset.annotationId, true);
+  });
+
+  preview.addEventListener("pointerout", (event) => {
+    const target = event.target.closest("[data-annotation-id]");
+    if (!target || !preview.contains(target)) return;
+    setActive(target.dataset.annotationId, false);
+  });
+
+  preview.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-annotation-id]");
+    if (!target || !preview.contains(target)) return;
+    const counterpart = [...preview.querySelectorAll(`[data-annotation-id="${CSS.escape(target.dataset.annotationId)}"]`)]
+      .find((item) => item !== target);
+    counterpart?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+  });
 }
 
 function downloadStaticBoardHtml(payload, html) {

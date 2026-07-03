@@ -955,6 +955,13 @@ svg {
   gap: 8px;
 }
 
+.export-image-head .export-preview-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .export-preview-download {
   display: inline-flex;
   height: 32px;
@@ -1038,6 +1045,15 @@ svg {
 
 .export-html-mark.delete {
   background: color-mix(in srgb, var(--annotation-color) 16%, transparent);
+}
+
+.export-html-mark.active,
+.export-html-dot-wrap.active {
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--annotation-color) 62%, transparent));
+}
+
+.export-html-mark.active {
+  background: color-mix(in srgb, var(--annotation-color) 14%, transparent);
 }
 
 .export-html-dot {
@@ -1124,6 +1140,12 @@ svg {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
   padding: 12px 10px 10px 30px;
+}
+
+.export-html-comment:hover,
+.export-html-comment.active {
+  border-color: color-mix(in srgb, var(--annotation-color) 62%, var(--line));
+  background: color-mix(in srgb, var(--annotation-color) 12%, transparent);
 }
 
 .export-html-comment-index {
