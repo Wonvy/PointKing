@@ -44,7 +44,7 @@ html[data-theme="light"] {
 html,
 body {
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
 }
 
 body {
@@ -275,6 +275,10 @@ svg {
   display: none;
 }
 
+#docSubtitle {
+  display: none;
+}
+
 .dropzone {
   position: relative;
   display: grid;
@@ -385,7 +389,7 @@ svg {
 
 .file-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .file-card {
@@ -393,7 +397,7 @@ svg {
   gap: 10px;
   width: 100%;
   min-height: 58px;
-  margin-bottom: 8px;
+  margin-bottom: 2px;
   padding: 10px 40px 10px 10px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -403,7 +407,19 @@ svg {
 }
 
 .file-card > div {
+  display: grid;
+  gap: 4px;
   min-width: 0;
+}
+
+.file-card > div > strong,
+.file-card > div > span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-card:hover {
@@ -413,6 +429,15 @@ svg {
 .file-card.active {
   background: var(--panel-2);
   border-color: var(--line);
+}
+
+.file-card.selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.file-card.active.selected {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
 }
 
 .file-delete {
@@ -500,7 +525,7 @@ svg {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 0;
 }
 
@@ -631,6 +656,14 @@ svg {
   white-space: nowrap;
 }
 
+.statusbar-description {
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .topbar {
   position: relative;
   z-index: 10;
@@ -649,6 +682,24 @@ svg {
   min-width: 0;
 }
 
+.title-brand-mark {
+  display: none;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+}
+
+.title-brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.app.left-collapsed .title-brand-mark {
+  display: block;
+}
+
 .document-title div {
   min-width: 0;
 }
@@ -658,14 +709,6 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 99px;
-  background: var(--accent-2);
-  box-shadow: 0 0 0 4px rgba(0, 194, 168, 0.12);
 }
 
 .tools,
@@ -1098,7 +1141,7 @@ svg {
   width: min(760px, 100%);
   min-height: 980px;
   overflow: visible;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: 0;
   background: #f6f7f9;
   box-shadow: var(--shadow);
@@ -1107,6 +1150,10 @@ svg {
 html[data-theme="light"] .doc-page,
 html[data-theme="light"] .placeholder {
   background-color: #ffffff;
+}
+
+html[data-theme="light"] .doc-page {
+  border-color: transparent;
 }
 
 html[data-theme="light"] .placeholder {
@@ -1904,25 +1951,41 @@ html[data-theme="light"] .placeholder {
 }
 
 .inline-reference-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-height: 0;
-  padding: 0 96px 37px 6px;
+  position: absolute;
+  inset: 5px;
+  z-index: 0;
+  overflow: hidden;
+  padding: 7px 96px 38px 6px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.inline-reference-list:empty {
+.inline-reference-list::-webkit-scrollbar {
   display: none;
 }
 
-.inline-reference-image {
+.inline-reference-list {
+  scrollbar-width: none;
+}
+
+.inline-reference-list:empty {
   display: block;
-  width: 24px;
-  height: 24px;
+}
+
+.inline-reference-image {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  margin: 0 3px;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 5px;
   background: #f6f7f9;
   object-fit: cover;
+  vertical-align: -6px;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease,
@@ -2147,6 +2210,8 @@ html[data-theme="light"] .placeholder {
 
 .mark-input,
 .text-input {
+  position: relative;
+  z-index: 1;
   width: 100%;
   min-height: calc(2lh + 14px);
   max-height: 132px;
@@ -2155,7 +2220,8 @@ html[data-theme="light"] .placeholder {
   padding: 7px 96px 38px 6px;
   outline: 0;
   background: transparent;
-  color: var(--text);
+  color: transparent;
+  caret-color: var(--text);
   font-size: 13px;
   line-height: 1.35;
   overflow-y: auto;
@@ -2188,6 +2254,11 @@ html[data-theme="light"] .placeholder {
 .mark-input::placeholder,
 .text-input::placeholder {
   color: var(--muted);
+}
+
+.mark-input:placeholder-shown,
+.text-input:placeholder-shown {
+  color: var(--text);
 }
 
 .text-note {
@@ -2494,7 +2565,7 @@ html[data-theme="light"] .placeholder {
   width: 100%;
   height: 100%;
   border-radius: 0;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .comment-reference-list {
@@ -2527,7 +2598,7 @@ html[data-theme="light"] .placeholder {
   width: 100%;
   height: 100%;
   border-radius: 0;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .comment-image-preview {
@@ -2586,6 +2657,19 @@ html[data-theme="light"] .comment.active {
   flex: 0 0 auto;
   margin-left: auto;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
+}
+
+.comment-title-meta {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.comment-title-time {
+  color: color-mix(in srgb, var(--muted) 58%, transparent);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .comment p {

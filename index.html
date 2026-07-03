@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PointKing</title>
     <link rel="icon" type="image/svg+xml" href="./assets/pointking-icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260704-comment-page-right" />
+    <link rel="stylesheet" href="./styles.css?v=20260704-inline-image-anchor" />
   </head>
   <body>
     <div class="app">
@@ -47,7 +47,9 @@
       <main class="workspace">
         <header class="topbar">
           <div class="document-title">
-            <span class="status-dot"></span>
+            <span class="title-brand-mark" aria-hidden="true">
+              <img src="./assets/pointking-icon.svg" alt="" />
+            </span>
             <div>
               <strong id="docTitle">&#25351;&#28857;&#29579;</strong>
               <span id="docSubtitle"></span>
@@ -113,6 +115,7 @@
           <span class="statusbar-item">
             <span class="statusbar-label">&#25991;&#20214;</span>
             <strong id="statusFileName">&#26410;&#36873;&#25321;&#25991;&#20214;</strong>
+            <span class="statusbar-description" id="statusFileMeta">PDF, PNG, JPG</span>
           </span>
           <button class="statusbar-icon-toggle" id="detailToggleBtn" type="button" title="&#26174;&#31034;&#35814;&#32454;&#25209;&#27880;" aria-label="&#26174;&#31034;&#35814;&#32454;&#25209;&#27880;" aria-pressed="false">
             <i data-lucide="info"></i>
@@ -162,7 +165,7 @@
       </div>
     </div>
 
-    <script src="./vendor/lucide/lucide.min.js?v=20260704-comment-page-right"></script>
-    <script src="./script.js?v=20260704-comment-page-right" type="module"></script>
+    <script src="./vendor/lucide/lucide.min.js?v=20260704-inline-image-anchor"></script>
+    <script src="./script.js?v=20260704-inline-image-anchor" type="module"></script>
   </body>
 </html>

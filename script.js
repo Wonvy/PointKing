@@ -28,6 +28,7 @@ const mobileZoomControl = document.querySelector("#mobileZoomControl");
 const mobileZoomSlider = document.querySelector("#mobileZoomSlider");
 const zoomReadout = document.querySelector("#zoomReadout");
 const statusFileName = document.querySelector("#statusFileName");
+const statusFileMeta = document.querySelector("#statusFileMeta");
 const statusCommentCount = document.querySelector("#statusCommentCount");
 const statusZoom = document.querySelector("#statusZoom");
 const statusZoomSlider = document.querySelector("#statusZoomSlider");
@@ -94,6 +95,8 @@ const translations = {
     confirmClearBody: "\u6b64\u64cd\u4f5c\u4f1a\u5220\u9664\u53f3\u4fa7\u5217\u8868\u548c\u753b\u5e03\u4e0a\u7684\u6240\u6709\u6279\u6ce8\uff0c\u65e0\u6cd5\u64a4\u56de\u3002",
     confirmDeleteDocumentTitle: "\u5220\u9664\u6587\u6863\uff1f",
     confirmDeleteDocumentBody: "\u5220\u9664\u300c${name}\u300d\u540e\uff0c\u6587\u4ef6\u548c\u5b83\u7684\u6279\u6ce8\u90fd\u4f1a\u4ece\u5de5\u4f5c\u53f0\u79fb\u9664\u3002",
+    confirmDeleteDocumentsTitle: "\u5220\u9664 ${count} \u4e2a\u6587\u6863\uff1f",
+    confirmDeleteDocumentsBody: "\u5220\u9664\u540e\uff0c\u8fd9\u4e9b\u6587\u4ef6\u548c\u5b83\u4eec\u7684\u6279\u6ce8\u90fd\u4f1a\u4ece\u5de5\u4f5c\u53f0\u79fb\u9664\u3002",
     confirmDeletePageTitle: "\u5220\u9664\u753b\u677f\uff1f",
     confirmDeletePageBody: "\u5220\u9664 Page ${page} \u540e\uff0c\u8fd9\u4e00\u9875\u4e0a\u7684\u6279\u6ce8\u4e5f\u4f1a\u4e00\u8d77\u79fb\u9664\u3002",
     cancel: "\u53d6\u6d88",
@@ -157,6 +160,8 @@ const translations = {
     confirmClearBody: "This removes every annotation from the list and canvas. This action cannot be undone.",
     confirmDeleteDocumentTitle: "Delete document?",
     confirmDeleteDocumentBody: "Deleting \"${name}\" removes the file and its annotations from this workspace.",
+    confirmDeleteDocumentsTitle: "Delete ${count} documents?",
+    confirmDeleteDocumentsBody: "This removes these files and their annotations from this workspace.",
     confirmDeletePageTitle: "Delete board?",
     confirmDeletePageBody: "Deleting Page ${page} also removes annotations on that page.",
     cancel: "Cancel",
@@ -215,6 +220,8 @@ let detailCalloutsVisible = localStorage.getItem(detailCalloutsStorageKey) === "
 let submitMode = localStorage.getItem(submitModeStorageKey) === "ctrlEnter" ? "ctrlEnter" : "enter";
 let currentDocumentKey = null;
 let documentCatalog = loadDocumentCatalog();
+let selectedDocumentKeys = new Set();
+let lastSelectedDocumentKey = null;
 let deletedPageIds = new Set();
 let annotations = [];
 let dragStart = null;
@@ -760,6 +767,12 @@ function applyLanguage() {
   applyTheme();
 }
 
+function setFileMetaText(text) {
+  const nextText = text || "";
+  fileMeta.textContent = nextText;
+  if (statusFileMeta) statusFileMeta.textContent = nextText;
+}
+
 function applyTheme() {
   document.documentElement.dataset.theme = currentTheme;
   const nextIcon = currentTheme === "dark" ? "sun" : "moon";
@@ -889,6 +902,25 @@ function updateMagnifier(event) {
   magnifierLens.style.left = `${Math.min(window.innerWidth - size - 12, event.clientX + 18)}px`;
   magnifierLens.style.top = `${Math.max(12, event.clientY - size - 18)}px`;
   magnifierLens.dataset.scale = `${magnifierScale}x`;
+}
+
+function beginAnnotationOperationMagnifier(event, page) {
+  if (!magnifierEnabled || !page || event.button !== 0) return;
+
+  window.clearTimeout(magnifierTimer);
+  magnifierTimer = null;
+  magnifierActive = true;
+  magnifierWasShown = true;
+  magnifierPointerId = event.pointerId;
+  magnifierPage = page;
+  magnifierLens.classList.add("open");
+  updateAnnotationOperationMagnifier(event);
+}
+
+function updateAnnotationOperationMagnifier(event) {
+  if (!magnifierEnabled || !magnifierActive || !magnifierPage) return;
+  magnifierLastClient = { clientX: event.clientX, clientY: event.clientY };
+  updateMagnifier(magnifierLastClient);
 }
 
 function handleMagnifierScaleShortcut(event) {
@@ -1211,11 +1243,11 @@ function updateAnnotationContextMenu(annotationId) {
   renderLucideIcons();
 }
 
-function updateDocumentContextMenu(documentKey) {
-  const items = [
-    ["rename", "pencil", t("renameDocument")],
-    ["delete", "trash-2", t("deleteAnnotation")],
-  ];
+function updateDocumentContextMenu(documentKeys) {
+  const keys = normalizeDocumentSelection(documentKeys);
+  const items = [];
+  if (keys.length === 1) items.push(["rename", "pencil", t("renameDocument")]);
+  items.push(["delete", "trash-2", t("deleteAnnotation")]);
 
   canvasMenu.replaceChildren(
     ...items.map(([action, icon, label]) => {
@@ -1225,8 +1257,8 @@ function updateDocumentContextMenu(documentKey) {
       if (action === "delete") button.classList.add("danger");
       button.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`;
       button.addEventListener("click", () => {
-        if (action === "rename") renameDocumentByKey(documentKey);
-        if (action === "delete") confirmDeleteDocument(documentKey);
+        if (action === "rename") renameDocumentByKey(keys[0]);
+        if (action === "delete") confirmDeleteDocuments(keys);
         hideCanvasMenu();
       });
       return button;
@@ -1245,8 +1277,8 @@ function showAnnotationContextMenu(clientX, clientY, annotationId) {
   positionCanvasMenu(clientX, clientY);
 }
 
-function showDocumentContextMenu(clientX, clientY, documentKey) {
-  updateDocumentContextMenu(documentKey);
+function showDocumentContextMenu(clientX, clientY, documentKeys) {
+  updateDocumentContextMenu(documentKeys);
   positionCanvasMenu(clientX, clientY);
 }
 
@@ -2010,6 +2042,7 @@ function drawTextNote(layer, annotation) {
   dot.className = "text-dot";
   dot.append(createAnnotationIndexBadge(annotation));
   note.style.setProperty("--annotation-color", getAnnotationColor(annotation));
+  bindMarkMove(note, annotation);
   bindAnnotationEdit(note, annotation);
   bindAnnotationHover(note, annotation);
 
@@ -2232,17 +2265,19 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   input.rows = 2;
   input.placeholder = activeTabItem[2];
   input.value = annotation.text || "";
+  let previousInputValue = input.value;
   const inputRow = document.createElement("div");
   inputRow.className = "annotation-input-row";
   const inputActions = document.createElement("div");
   inputActions.className = "annotation-input-actions";
-  const inlineReferences = createInlineReferenceList(annotation);
+  const inlineReferences = createInlineReferenceList(annotation, input.value);
   const body = document.createElement("div");
   body.className = "editor-body";
   const references = createReferenceList(annotation);
   const resizeInput = () => autoResizeAnnotationInput(input);
   const updateSaveState = () => {
     resizeInput();
+    renderInlineReferenceList(inlineReferences, annotation, input.value);
     const canSave = activeEditorMode === "deleteContent" || input.value.trim().length > 0 || hasReferenceImages(annotation);
     saveButton.classList.toggle("visible", canSave);
     saveGroup.classList.toggle("visible", canSave);
@@ -2258,7 +2293,14 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   });
   pasteButton.addEventListener("click", () => pasteClipboardIntoAnnotation(input, annotation, references, inlineReferences, updateSaveState));
   closeButton.addEventListener("click", () => cancelAnnotation(annotation.id));
-  input.addEventListener("input", updateSaveState);
+  input.addEventListener("input", () => {
+    updateImageAnchorsForTextChange(annotation, previousInputValue, input.value);
+    previousInputValue = input.value;
+    updateSaveState();
+  });
+  input.addEventListener("scroll", () => {
+    inlineReferences.scrollTop = input.scrollTop;
+  });
   input.addEventListener("paste", (event) => handleAnnotationPaste(event, annotation, references, inlineReferences, updateSaveState));
   input.addEventListener("keydown", (event) => {
     if (handleAnnotationSubmitKey(event, input, updateSaveState)) {
@@ -2273,7 +2315,7 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   });
 
   inputActions.append(pasteButton, saveGroup);
-  inputRow.append(input, inlineReferences, inputActions);
+  inputRow.append(inlineReferences, input, inputActions);
   body.append(tabs, inputRow, references);
   editor.append(body);
   updateSaveState();
@@ -2424,11 +2466,59 @@ function createReferenceList(annotation) {
   return list;
 }
 
-function createInlineReferenceList(annotation) {
+function createInlineReferenceList(annotation, text = "") {
   const list = document.createElement("div");
   list.className = "inline-reference-list";
-  (annotation.images || []).forEach((src, index) => list.append(createReferenceImage(src, index, "inline-reference-image")));
+  renderInlineReferenceList(list, annotation, text);
   return list;
+}
+
+function renderInlineReferenceList(list, annotation, text = "") {
+  list.replaceChildren();
+  const images = annotation.images || [];
+  if (!text && !images.length) return;
+
+  const anchors = getAnnotationImageAnchors(annotation, text);
+  let cursor = 0;
+  anchors.forEach(({ index, offset }) => {
+    if (offset > cursor) list.append(document.createTextNode(text.slice(cursor, offset)));
+    if (images[index]) list.append(createReferenceImage(images[index], index, "inline-reference-image"));
+    cursor = offset;
+  });
+  if (cursor < text.length) list.append(document.createTextNode(text.slice(cursor)));
+}
+
+function getAnnotationImageAnchors(annotation, text = "") {
+  const images = annotation.images || [];
+  const anchors = Array.isArray(annotation.imageAnchors) ? annotation.imageAnchors : [];
+  return images
+    .map((_, index) => ({
+      index,
+      offset: clamp(Number(anchors[index] ?? text.length), 0, text.length),
+    }))
+    .sort((a, b) => a.offset - b.offset || a.index - b.index);
+}
+
+function updateImageAnchorsForTextChange(annotation, previousText, nextText) {
+  if (!Array.isArray(annotation.imageAnchors) || annotation.imageAnchors.length === 0) return;
+  let prefix = 0;
+  const maxPrefix = Math.min(previousText.length, nextText.length);
+  while (prefix < maxPrefix && previousText[prefix] === nextText[prefix]) prefix += 1;
+
+  let previousSuffix = previousText.length;
+  let nextSuffix = nextText.length;
+  while (previousSuffix > prefix && nextSuffix > prefix && previousText[previousSuffix - 1] === nextText[nextSuffix - 1]) {
+    previousSuffix -= 1;
+    nextSuffix -= 1;
+  }
+
+  const delta = (nextSuffix - prefix) - (previousSuffix - prefix);
+  annotation.imageAnchors = annotation.imageAnchors.map((offset) => {
+    const safeOffset = Number(offset || 0);
+    if (safeOffset <= prefix) return clamp(safeOffset, 0, nextText.length);
+    if (safeOffset >= previousSuffix) return clamp(safeOffset + delta, 0, nextText.length);
+    return clamp(prefix, 0, nextText.length);
+  });
 }
 
 function createReferenceImage(src, index, className) {
@@ -2472,15 +2562,17 @@ function handleAnnotationPaste(event, annotation, references, inlineReferences, 
   if (!imageItems.length) return;
 
   event.preventDefault();
+  const anchorOffset = getActiveAnnotationInputOffset(inlineReferences);
 
   imageItems.forEach((item) => {
     const file = item.getAsFile();
-    if (file) addReferenceImageFile(file, annotation, references, inlineReferences, onChange);
+    if (file) addReferenceImageFile(file, annotation, references, inlineReferences, onChange, anchorOffset);
   });
 }
 
 async function pasteClipboardIntoAnnotation(input, annotation, references, inlineReferences, onChange) {
   let handled = false;
+  const anchorOffset = input.selectionStart ?? input.value.length;
 
   try {
     if (navigator.clipboard?.read) {
@@ -2489,7 +2581,7 @@ async function pasteClipboardIntoAnnotation(input, annotation, references, inlin
         const imageType = item.types.find((type) => type.startsWith("image/"));
         if (imageType) {
           const blob = await item.getType(imageType);
-          addReferenceImageFile(blob, annotation, references, inlineReferences, onChange);
+          addReferenceImageFile(blob, annotation, references, inlineReferences, onChange, anchorOffset);
           handled = true;
         }
 
@@ -2528,6 +2620,11 @@ function insertTextAtCursor(input, text) {
   input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
   const nextPosition = start + text.length;
   input.setSelectionRange(nextPosition, nextPosition);
+}
+
+function getActiveAnnotationInputOffset(inlineReferences) {
+  const input = inlineReferences.closest(".annotation-input-row")?.querySelector("textarea");
+  return input?.selectionStart ?? input?.value.length ?? 0;
 }
 
 function getClipboardImageFile(event) {
@@ -2569,16 +2666,20 @@ async function loadImageFromClipboard() {
   }
 }
 
-function addReferenceImageFile(file, annotation, references, inlineReferences, onChange) {
+function addReferenceImageFile(file, annotation, references, inlineReferences, onChange, anchorOffset = null) {
   annotation.images ||= [];
+  annotation.imageAnchors ||= [];
   const reader = new FileReader();
   reader.onload = () => {
     const src = String(reader.result);
     annotation.images.push(src);
     const index = annotation.images.length - 1;
+    const input = inlineReferences.closest(".annotation-input-row")?.querySelector("textarea");
+    const textLength = input?.value.length ?? annotation.text?.length ?? 0;
+    annotation.imageAnchors[index] = clamp(Number(anchorOffset ?? textLength), 0, textLength);
     syncReferenceListLayout(references, annotation);
     references.append(createReferenceImage(src, index, "reference-image"));
-    inlineReferences.append(createReferenceImage(src, index, "inline-reference-image"));
+    renderInlineReferenceList(inlineReferences, annotation, input?.value || annotation.text || "");
     onChange?.();
     if (!annotation.draft) {
       touchAnnotation(annotation);
@@ -2768,17 +2869,24 @@ function bindMarkMove(box, annotation) {
     const startY = annotation.y;
     let moved = false;
     box.classList.add("moving");
+    beginAnnotationOperationMagnifier(event, page);
 
     const move = (moveEvent) => {
       const next = getPagePoint(moveEvent, page);
+      updateAnnotationOperationMagnifier(moveEvent);
       if (Math.hypot(next.x - start.x, next.y - start.y) > 0.2) moved = true;
-      annotation.x = clamp(startX + next.x - start.x, 0, 100 - annotation.width);
-      annotation.y = clamp(startY + next.y - start.y, 0, 100 - annotation.height);
+      if (annotation.type === "mark") {
+        annotation.x = clamp(startX + next.x - start.x, 0, 100 - annotation.width);
+        annotation.y = clamp(startY + next.y - start.y, 0, 100 - annotation.height);
+      } else {
+        annotation.x = clamp(startX + next.x - start.x, 0, 100);
+        annotation.y = clamp(startY + next.y - start.y, 0, 100);
+      }
       box.style.left = `${annotation.x}%`;
       box.style.top = `${annotation.y}%`;
       updateAnnotationArrow(annotation);
       syncAnnotationEditorPosition(annotation);
-      scheduleRegionPreviewRefresh(annotation.id);
+      if (annotation.type === "mark") scheduleRegionPreviewRefresh(annotation.id);
     };
 
     const stop = () => {
@@ -2786,6 +2894,7 @@ function bindMarkMove(box, annotation) {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       box.classList.remove("moving");
+      stopMagnifier();
       if (moved && !annotation.draft) {
         touchAnnotation(annotation);
         saveAnnotations();
@@ -2852,8 +2961,11 @@ function bindAnnotationArrow(handle, annotation, side) {
       updateAnnotationArrow(annotation);
     }
 
+    beginAnnotationOperationMagnifier(event, page);
+
     const move = (moveEvent) => {
       const next = getPagePoint(moveEvent, page);
+      updateAnnotationOperationMagnifier(moveEvent);
       annotation.arrowX = clamp(next.x, 0, 100);
       annotation.arrowY = clamp(next.y, 0, 100);
       updateAnnotationArrow(annotation);
@@ -2864,6 +2976,7 @@ function bindAnnotationArrow(handle, annotation, side) {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       handle.releasePointerCapture?.(event.pointerId);
+      stopMagnifier();
       if (!annotation.draft) {
         touchAnnotation(annotation);
         saveAnnotations();
@@ -2910,9 +3023,11 @@ function bindAnnotationArrowEdit(arrow, annotation) {
 
       arrow.classList.add("dragging", "hovered");
       target.setPointerCapture?.(event.pointerId);
+      beginAnnotationOperationMagnifier(event, page);
 
       const move = (moveEvent) => {
         const next = getPagePoint(moveEvent, page);
+        updateAnnotationOperationMagnifier(moveEvent);
         annotation.arrowX = clamp(next.x, 0, 100);
         annotation.arrowY = clamp(next.y, 0, 100);
         updateAnnotationArrow(annotation);
@@ -2924,6 +3039,7 @@ function bindAnnotationArrowEdit(arrow, annotation) {
         window.removeEventListener("pointercancel", stop);
         target.releasePointerCapture?.(event.pointerId);
         arrow.classList.remove("dragging");
+        stopMagnifier();
         if (!target.matches(":hover")) arrow.classList.remove("hovered");
         if (!annotation.draft) {
           touchAnnotation(annotation);
@@ -2955,9 +3071,11 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
     const fixedBottom = startY + startHeight;
     const box = handle.closest(".mark-box");
     box.classList.add("resizing");
+    beginAnnotationOperationMagnifier(event, page);
 
     const move = (moveEvent) => {
       const next = getPagePoint(moveEvent, page);
+      updateAnnotationOperationMagnifier(moveEvent);
       if (corner === "top-left") {
         const nextX = clamp(startX + next.x - start.x, 0, fixedRight - 4);
         const nextY = clamp(startY + next.y - start.y, 0, fixedBottom - 3);
@@ -2983,6 +3101,7 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       box.classList.remove("resizing");
+      stopMagnifier();
       if (!annotation.draft) {
         touchAnnotation(annotation);
         saveAnnotations();
@@ -3070,18 +3189,21 @@ function addComment(annotation, container = commentList) {
 
   const title = document.createElement("strong");
   title.className = "comment-title";
+  const titleMeta = document.createElement("span");
+  titleMeta.className = "comment-title-meta";
   const titleIntent = document.createElement("span");
   titleIntent.textContent = getAnnotationIntentLabel(annotation);
+  const time = document.createElement("time");
+  time.className = "comment-title-time";
+  time.textContent = currentLanguage === "zh" ? "\u521a\u521a" : "Just now";
+  titleMeta.append(titleIntent, time);
   const titlePage = document.createElement("span");
   titlePage.className = "comment-title-page";
   titlePage.textContent = t("page", { page: annotation.pageId });
-  title.append(titleIntent, titlePage);
+  title.append(titleMeta, titlePage);
 
   const text = document.createElement("p");
   text.textContent = annotation.text || getAnnotationFallbackText(annotation);
-
-  const time = document.createElement("time");
-  time.textContent = currentLanguage === "zh" ? "\u521a\u521a" : "Just now";
 
   body.append(title, text);
   if (annotation.type === "mark") {
@@ -3089,7 +3211,6 @@ function addComment(annotation, container = commentList) {
     if (regionPreview) body.append(regionPreview);
   }
   if (hasReferenceImages(annotation)) body.append(createCommentReferences(annotation));
-  body.append(time);
   article.append(body);
   container.append(article);
 }
@@ -3466,7 +3587,7 @@ async function loadFile(file, options = {}) {
   docTitle.textContent = file.name;
   fileName.textContent = file.name;
   statusFileName.textContent = file.name;
-  fileMeta.textContent = `${formatBytes(file.size)} \u00b7 \u672c\u5730\u9884\u89c8`;
+  setFileMetaText(`${formatBytes(file.size)} \u00b7 \u672c\u5730\u9884\u89c8`);
   await restoreAnnotationsForCurrentDocument();
   resetPages();
 
@@ -3560,7 +3681,7 @@ function renderImage(file) {
     const image = new Image();
     image.onload = () => {
       if (!isPageDeleted(1)) drawImageAsPage(image, 1);
-      fileMeta.textContent = `${formatBytes(file.size)} \u00b7 image \u00b7 \u672c\u5730\u9884\u89c8`;
+      setFileMetaText(`${formatBytes(file.size)} \u00b7 image \u00b7 \u672c\u5730\u9884\u89c8`);
       renderAnnotations();
       resetCanvasView();
       resolve();
@@ -3620,17 +3741,17 @@ function updateCurrentDocumentPageMeta(extraText = "") {
   const pageCount = pageStack.querySelectorAll(".doc-page").length;
   const currentRecord = documentCatalog.find((item) => item.key === currentDocumentKey);
   if (currentRecord?.kind === "blank") {
-    fileMeta.textContent = getBlankDocumentMetaText(currentRecord, pageCount, extraText);
+    setFileMetaText(getBlankDocumentMetaText(currentRecord, pageCount, extraText));
     updateDocumentRecord(currentDocumentKey, { pageCount });
     return;
   }
   if (!pageCount) {
-    fileMeta.textContent = `0 pages \u00b7 \u672c\u5730\u9884\u89c8`;
+    setFileMetaText(`0 pages \u00b7 \u672c\u5730\u9884\u89c8`);
     if (currentDocumentKey) updateDocumentRecord(currentDocumentKey, { pageCount: 0 });
     return;
   }
   const suffix = extraText ? ` \u00b7 ${extraText}` : "";
-  fileMeta.textContent = `${pageCount} pages${suffix} \u00b7 \u672c\u5730\u9884\u89c8`;
+  setFileMetaText(`${pageCount} pages${suffix} \u00b7 \u672c\u5730\u9884\u89c8`);
   if (currentDocumentKey) {
     updateDocumentRecord(currentDocumentKey, { pageCount });
   }
@@ -3724,7 +3845,7 @@ async function renderPdf(file) {
     await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
   }
 
-  fileMeta.textContent = `${pdf.numPages} pages \u00b7 \u672c\u5730\u9884\u89c8`;
+  setFileMetaText(`${pdf.numPages} pages \u00b7 \u672c\u5730\u9884\u89c8`);
   renderAnnotations();
   resetCanvasView();
 }
@@ -3808,10 +3929,11 @@ function renderDocumentList() {
       documentList.append(empty);
     }
     fileName.textContent = currentDocumentKey ? docTitle.textContent : "\u672a\u9009\u62e9\u6587\u4ef6";
-    fileMeta.textContent = currentDocumentKey ? fileMeta.textContent : "PDF, PNG, JPG";
+    setFileMetaText(currentDocumentKey ? fileMeta.textContent : "PDF, PNG, JPG");
     return;
   }
 
+  pruneSelectedDocumentKeys();
   documentList.innerHTML = "";
   documentCatalog.forEach((record) => {
     const button = document.createElement("div");
@@ -3820,14 +3942,26 @@ function renderDocumentList() {
     button.setAttribute("tabindex", "0");
     button.dataset.documentKey = record.key;
     button.classList.toggle("active", record.key === currentDocumentKey);
-    button.addEventListener("click", () => loadDocumentByKey(record.key));
+    button.classList.toggle("selected", selectedDocumentKeys.has(record.key));
+    button.setAttribute("aria-selected", selectedDocumentKeys.has(record.key) ? "true" : "false");
+    button.addEventListener("click", (event) => handleDocumentCardClick(event, record.key));
     button.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      showDocumentContextMenu(event.clientX, event.clientY, record.key);
+      if (!selectedDocumentKeys.has(record.key)) {
+        selectedDocumentKeys = new Set([record.key]);
+        lastSelectedDocumentKey = record.key;
+        renderDocumentList();
+      }
+      showDocumentContextMenu(event.clientX, event.clientY, Array.from(selectedDocumentKeys));
     });
     button.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
+      if (event.key === " ") {
+        event.preventDefault();
+        toggleDocumentSelection(record.key);
+        return;
+      }
+      if (event.key !== "Enter") return;
       event.preventDefault();
       loadDocumentByKey(record.key);
     });
@@ -3851,13 +3985,21 @@ function renderDocumentList() {
     deleteButton.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      confirmDeleteDocument(record.key);
+      if (selectedDocumentKeys.has(record.key) && selectedDocumentKeys.size > 1) {
+        confirmDeleteDocuments(Array.from(selectedDocumentKeys));
+      } else {
+        confirmDeleteDocument(record.key);
+      }
     });
     deleteButton.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       event.stopPropagation();
-      confirmDeleteDocument(record.key);
+      if (selectedDocumentKeys.has(record.key) && selectedDocumentKeys.size > 1) {
+        confirmDeleteDocuments(Array.from(selectedDocumentKeys));
+      } else {
+        confirmDeleteDocument(record.key);
+      }
     });
 
     button.append(type, body, deleteButton);
@@ -3897,10 +4039,15 @@ function getDocumentMetaText(record) {
   if (record.kind === "blank") {
     return getBlankDocumentMetaText(record);
   }
+  const createdText = formatDocumentCreatedAt(getDocumentCreatedAt(record));
   const size = Number(record.size || 0);
   const pages = Number(record.pageCount || 0);
-  const pageText = pages ? `${pages} page${pages > 1 ? "s" : ""} \u00b7 ` : "";
-  return `${pageText}${size ? formatBytes(size) : "\u672c\u5730\u9884\u89c8"}`;
+  const parts = [
+    createdText,
+    pages ? `${pages} page${pages > 1 ? "s" : ""}` : "",
+    size ? formatBytes(size) : "\u672c\u5730\u9884\u89c8",
+  ].filter(Boolean);
+  return parts.join(" \u00b7 ");
 }
 
 function getBlankDocumentMetaText(record = {}, pageCount = record.pageCount, extraText = "") {
@@ -3932,6 +4079,61 @@ function formatDocumentCreatedAt(timestamp) {
   });
 }
 
+function handleDocumentCardClick(event, key) {
+  if (event.shiftKey) {
+    selectDocumentRange(key);
+    return;
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    toggleDocumentSelection(key);
+    return;
+  }
+
+  selectedDocumentKeys = new Set([key]);
+  lastSelectedDocumentKey = key;
+  renderDocumentList();
+  loadDocumentByKey(key);
+}
+
+function toggleDocumentSelection(key) {
+  if (selectedDocumentKeys.has(key)) {
+    selectedDocumentKeys.delete(key);
+  } else {
+    selectedDocumentKeys.add(key);
+  }
+  lastSelectedDocumentKey = key;
+  renderDocumentList();
+}
+
+function selectDocumentRange(key) {
+  const currentIndex = documentCatalog.findIndex((item) => item.key === key);
+  const anchorIndex = documentCatalog.findIndex((item) => item.key === lastSelectedDocumentKey);
+  if (currentIndex < 0 || anchorIndex < 0) {
+    selectedDocumentKeys = new Set([key]);
+    lastSelectedDocumentKey = key;
+    renderDocumentList();
+    return;
+  }
+
+  const [start, end] = [Math.min(anchorIndex, currentIndex), Math.max(anchorIndex, currentIndex)];
+  selectedDocumentKeys = new Set(documentCatalog.slice(start, end + 1).map((item) => item.key));
+  renderDocumentList();
+}
+
+function pruneSelectedDocumentKeys() {
+  if (!selectedDocumentKeys.size) return;
+  const availableKeys = new Set(documentCatalog.map((item) => item.key));
+  selectedDocumentKeys = new Set(Array.from(selectedDocumentKeys).filter((key) => availableKeys.has(key)));
+  if (lastSelectedDocumentKey && !availableKeys.has(lastSelectedDocumentKey)) lastSelectedDocumentKey = null;
+}
+
+function normalizeDocumentSelection(documentKeys) {
+  const keys = Array.isArray(documentKeys) ? documentKeys : [documentKeys];
+  const availableKeys = new Set(documentCatalog.map((item) => item.key));
+  return keys.filter((key) => key && availableKeys.has(key));
+}
+
 function renameDocumentByKey(key) {
   const record = documentCatalog.find((item) => item.key === key);
   if (!record) return;
@@ -3953,26 +4155,44 @@ function renameDocumentByKey(key) {
 }
 
 function confirmDeleteDocument(key) {
-  const record = documentCatalog.find((item) => item.key === key);
-  if (!record) return;
+  confirmDeleteDocuments([key]);
+}
+
+function confirmDeleteDocuments(keys) {
+  const documentKeys = normalizeDocumentSelection(keys);
+  if (!documentKeys.length) return;
+  const records = documentKeys.map((key) => documentCatalog.find((item) => item.key === key)).filter(Boolean);
+  if (!records.length) return;
+  const isSingle = records.length === 1;
 
   showConfirmDialog({
-    title: t("confirmDeleteDocumentTitle"),
-    body: t("confirmDeleteDocumentBody", { name: record.name }),
+    title: isSingle ? t("confirmDeleteDocumentTitle") : t("confirmDeleteDocumentsTitle", { count: records.length }),
+    body: isSingle ? t("confirmDeleteDocumentBody", { name: records[0].name }) : t("confirmDeleteDocumentsBody", { count: records.length }),
     confirmLabel: t("confirmDelete"),
-    onConfirm: () => deleteDocumentByKey(key),
+    onConfirm: () => deleteDocumentsByKeys(documentKeys),
   });
 }
 
 async function deleteDocumentByKey(key) {
-  const wasCurrent = key === currentDocumentKey;
-  documentCatalog = documentCatalog.filter((item) => item.key !== key);
+  await deleteDocumentsByKeys([key]);
+}
+
+async function deleteDocumentsByKeys(keys) {
+  const documentKeys = normalizeDocumentSelection(keys);
+  if (!documentKeys.length) return;
+  const keySet = new Set(documentKeys);
+  const wasCurrent = currentDocumentKey && keySet.has(currentDocumentKey);
+  documentCatalog = documentCatalog.filter((item) => !keySet.has(item.key));
+  selectedDocumentKeys = new Set();
+  lastSelectedDocumentKey = null;
   saveDocumentCatalog();
-  removeStoredDocument(key).catch(() => {});
-  removeAnnotationSnapshot(key).catch(() => {});
+  documentKeys.forEach((key) => {
+    removeStoredDocument(key).catch(() => {});
+    removeAnnotationSnapshot(key).catch(() => {});
+  });
   try {
-    localStorage.removeItem(`${storagePrefix}${key}`);
-    if (localStorage.getItem(lastDocumentKey) === key) localStorage.removeItem(lastDocumentKey);
+    documentKeys.forEach((key) => localStorage.removeItem(`${storagePrefix}${key}`));
+    if (keySet.has(localStorage.getItem(lastDocumentKey))) localStorage.removeItem(lastDocumentKey);
   } catch {}
 
   if (!wasCurrent) {
@@ -3996,7 +4216,7 @@ function showStartupPage() {
   annotations = [];
   docTitle.textContent = t("appTitle");
   fileName.textContent = "\u672a\u9009\u62e9\u6587\u4ef6";
-  fileMeta.textContent = "PDF, PNG, JPG";
+  setFileMetaText("PDF, PNG, JPG");
   statusFileName.textContent = "\u672a\u9009\u62e9\u6587\u4ef6";
   try {
     localStorage.removeItem(lastDocumentKey);
@@ -4059,7 +4279,7 @@ async function createNewBlankDocument() {
     docTitle.textContent = name;
     fileName.textContent = name;
     statusFileName.textContent = name;
-    fileMeta.textContent = getBlankDocumentMetaText({ key, createdAt: timestamp }, 0);
+    setFileMetaText(getBlankDocumentMetaText({ key, createdAt: timestamp }, 0));
     resetPages();
     renderStartupPanel();
     renderAnnotations();
@@ -4090,7 +4310,7 @@ async function loadDocumentByKey(key, options = {}) {
     fileName.textContent = record.name;
     statusFileName.textContent = record.name;
     const storedPageCount = Number(record.pageCount || 0);
-    fileMeta.textContent = getBlankDocumentMetaText(record, storedPageCount);
+    setFileMetaText(getBlankDocumentMetaText(record, storedPageCount));
     await restoreAnnotationsForCurrentDocument();
     resetPages();
     await appendStoredExtraPages(currentDocumentKey);
