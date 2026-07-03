@@ -798,6 +798,15 @@ svg {
   overflow: hidden;
 }
 
+.export-image-overlay:not(.export-html-overlay).open {
+  place-items: stretch center;
+}
+
+.export-image-overlay:not(.export-html-overlay) .export-image-panel {
+  width: min(1080px, 100%);
+  height: 100%;
+}
+
 .export-image-head {
   display: flex;
   align-items: center;
@@ -842,26 +851,29 @@ svg {
 
 .export-image-list {
   display: grid;
+  align-items: start;
+  justify-items: center;
   gap: 16px;
   overflow: auto;
   padding: 18px;
 }
 
 .export-image-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: block;
   justify-self: center;
-  width: min(980px, 100%);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #f7f8fb;
-  overflow: hidden;
+  width: auto;
+  max-width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
   cursor: pointer;
 }
 
 .export-image-card > img {
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
   object-fit: contain;
   background: #fff;
