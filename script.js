@@ -1,8 +1,9 @@
-﻿import * as pdfjs from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.mjs";
+import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
 
 const app = document.querySelector(".app");
 const canvasViewport = document.querySelector("#canvasViewport");
 const canvasSurface = document.querySelector("#canvasSurface");
+const emptyState = document.querySelector("#emptyState");
 const pageStack = document.querySelector("#pageStack");
 const leftResizeHandle = document.querySelector("#leftResizeHandle");
 const rightResizeHandle = document.querySelector("#rightResizeHandle");
@@ -11,6 +12,7 @@ const rightCollapseBtn = document.querySelector("#rightCollapseBtn");
 const fileInput = document.querySelector("#fileInput");
 const dropzone = document.querySelector("#dropzone");
 const docTitle = document.querySelector("#docTitle");
+const documentList = document.querySelector("#documentList");
 const fileName = document.querySelector("#fileName");
 const fileMeta = document.querySelector("#fileMeta");
 const tools = document.querySelectorAll(".tool[data-tool]");
@@ -19,7 +21,17 @@ const undoBtn = document.querySelector("#undoBtn");
 const clearBtn = document.querySelector("#clearBtn");
 const shareBtn = document.querySelector("#shareBtn");
 const shareText = document.querySelector("#shareText");
+const mobileFileBtn = document.querySelector("#mobileFileBtn");
+const mobileFileText = document.querySelector("#mobileFileText");
+const newDocumentBtn = document.querySelector("#newDocumentBtn");
+const mobileZoomControl = document.querySelector("#mobileZoomControl");
+const mobileZoomSlider = document.querySelector("#mobileZoomSlider");
 const zoomReadout = document.querySelector("#zoomReadout");
+const statusFileName = document.querySelector("#statusFileName");
+const statusCommentCount = document.querySelector("#statusCommentCount");
+const statusZoom = document.querySelector("#statusZoom");
+const statusZoomSlider = document.querySelector("#statusZoomSlider");
+const detailToggleBtn = document.querySelector("#detailToggleBtn");
 const commentList = document.querySelector("#commentList");
 const commentCount = document.querySelector("#commentCount");
 const commentSearch = document.querySelector("#commentSearch");
@@ -32,31 +44,35 @@ const docSubtitle = document.querySelector("#docSubtitle");
 const languageBtn = document.querySelector("#languageBtn");
 const languageText = document.querySelector("#languageText");
 const themeBtn = document.querySelector("#themeBtn");
-const placeholderProduct = document.querySelector("#placeholderProduct");
 const placeholderTitle = document.querySelector("#placeholderTitle");
 const placeholderCopy = document.querySelector("#placeholderCopy");
+const placeholderFileBtn = document.querySelector("#placeholderFileBtn");
+const placeholderPasteBtn = document.querySelector("#placeholderPasteBtn");
 const commentsTitle = document.querySelector("#commentsTitle");
 const canvasMenu = createCanvasMenu();
 const annotationNotice = createAnnotationNotice();
 const magnifierLens = createMagnifierLens();
 const confirmDialog = createConfirmDialog();
+const renameDialog = createRenameDialog();
 let commentImagePreview;
 
 const translations = {
   zh: {
-    appTitle: "\u6307\u70b9\u738b",
-    brandSub: "\u6279\u6ce8\u5de5\u4f5c\u53f0",
+    appTitle: "PointKing",
+    brandSub: "",
     dropTitle: "\u62d6\u5165\u6587\u4ef6",
+    chooseFile: "\u9009\u62e9\u6587\u4ef6",
+    newDocument: "\u65b0\u5efa",
+    blankDocument: "\u65b0\u5efa\u753b\u5e03",
+    blankMeta: "\u7a7a\u767d\u753b\u5e03",
     panelTitle: "\u6587\u4ef6",
-    docSubtitle: "\u5728\u7ebf\u6279\u6ce8 \u00b7 \u591a\u9875\u753b\u5e03",
+    docSubtitle: "",
     share: "\u5bfc\u51fa",
     copied: "\u5bfc\u51fa\u529f\u80fd\u5f85\u6dfb\u52a0",
     ready: "\u5df2\u5c31\u7eea",
     comments: "\u6279\u6ce8",
-    placeholderProduct: "\u6307\u70b9\u738b",
-    placeholderTitle: "\u591a\u9875 PDF \u4e00\u6b21\u5c55\u5f00",
-    placeholderCopy:
-      "\u5bfc\u5165 PDF \u540e\uff0c\u9875\u9762\u4f1a\u5728\u65e0\u9650\u753b\u5e03\u4e0a\u7eb5\u5411\u6392\u5e03\u3002\u6309\u4f4f Ctrl \u5e76\u6eda\u52a8\u9f20\u6807\u53ef\u4ee5\u7f29\u653e\u753b\u5e03\u3002",
+    placeholderTitle: "\u6dfb\u52a0\u6587\u4ef6",
+    placeholderCopy: "\u5bfc\u5165\u6587\u4ef6\u6216\u7c98\u8d34\u56fe\u7247\u5f00\u59cb\u6279\u6ce8\u3002",
     markTool: "\u6279\u6ce8",
     magnifierTool: "\u653e\u5927\u955c",
     selectTool: "\u9009\u62e9",
@@ -70,10 +86,16 @@ const translations = {
     editTextPlaceholder: "\u8f93\u5165\u9700\u8981\u66ff\u6362\u7684\u6587\u672c",
     deletePlaceholder: "\u8f93\u5165\u9700\u8981\u5220\u9664\u7684\u5185\u5bb9\u6216\u8bf4\u660e",
     deleteFallback: "\u5220\u9664\u6b64\u533a\u57df\u5185\u5bb9",
+    renameDocument: "\u91cd\u547d\u540d",
+    renameDocumentPrompt: "\u8f93\u5165\u65b0\u6587\u6863\u540d\u79f0",
     searchAnnotations: "\u641c\u7d22\u6279\u6ce8",
     filterAll: "\u5168\u90e8",
     confirmClearTitle: "\u5220\u9664\u5168\u90e8\u6279\u6ce8\uff1f",
     confirmClearBody: "\u6b64\u64cd\u4f5c\u4f1a\u5220\u9664\u53f3\u4fa7\u5217\u8868\u548c\u753b\u5e03\u4e0a\u7684\u6240\u6709\u6279\u6ce8\uff0c\u65e0\u6cd5\u64a4\u56de\u3002",
+    confirmDeleteDocumentTitle: "\u5220\u9664\u6587\u6863\uff1f",
+    confirmDeleteDocumentBody: "\u5220\u9664\u300c${name}\u300d\u540e\uff0c\u6587\u4ef6\u548c\u5b83\u7684\u6279\u6ce8\u90fd\u4f1a\u4ece\u5de5\u4f5c\u53f0\u79fb\u9664\u3002",
+    confirmDeletePageTitle: "\u5220\u9664\u753b\u677f\uff1f",
+    confirmDeletePageBody: "\u5220\u9664 Page ${page} \u540e\uff0c\u8fd9\u4e00\u9875\u4e0a\u7684\u6279\u6ce8\u4e5f\u4f1a\u4e00\u8d77\u79fb\u9664\u3002",
     cancel: "\u53d6\u6d88",
     confirmDelete: "\u5220\u9664",
     unsavedAnnotation: "\u8bf7\u5148\u4fdd\u5b58\u5f53\u524d\u6279\u6ce8",
@@ -88,21 +110,31 @@ const translations = {
     expandLeft: "\u5c55\u5f00\u5de6\u680f",
     collapseRight: "\u6298\u53e0\u53f3\u680f",
     expandRight: "\u5c55\u5f00\u53f3\u680f",
+    detailCallouts: "\u663e\u793a\u8be6\u7ec6\u6279\u6ce8",
+    pasteClipboard: "\u7c98\u8d34\u526a\u8d34\u677f",
+    pasteImageHint: "\u6d4f\u89c8\u5668\u4e0d\u5141\u8bb8\u6309\u94ae\u8bfb\u53d6\u526a\u8d34\u677f\u56fe\u7247\uff0c\u8bf7\u6309 Ctrl+V \u7c98\u8d34\u3002",
+    pasteNoImage: "\u526a\u8d34\u677f\u91cc\u6ca1\u6709\u53ef\u7c98\u8d34\u7684\u56fe\u7247",
+    pastedImage: "\u5df2\u7c98\u8d34\u56fe\u7247",
+    submitShortcut: "\u63d0\u4ea4\u65b9\u5f0f",
+    enterSubmit: "Enter \u63d0\u4ea4",
+    ctrlEnterSubmit: "Ctrl+Enter \u63d0\u4ea4",
   },
   en: {
     appTitle: "PointKing",
-    brandSub: "Review desk",
+    brandSub: "",
     dropTitle: "Drop file",
+    chooseFile: "Choose file",
+    newDocument: "New",
+    blankDocument: "New board",
+    blankMeta: "Blank board",
     panelTitle: "Files",
-    docSubtitle: "Online review · Multi-page canvas",
+    docSubtitle: "",
     share: "Export",
     copied: "Export coming soon",
     ready: "Ready",
     comments: "Comments",
-    placeholderProduct: "PointKing",
-    placeholderTitle: "Open every PDF page at once",
-    placeholderCopy:
-      "Import a PDF and every page is arranged on an infinite canvas. Hold Ctrl and scroll to zoom the canvas.",
+    placeholderTitle: "Add a file",
+    placeholderCopy: "Import a file or paste an image to start reviewing.",
     markTool: "Annotate",
     magnifierTool: "Magnifier",
     selectTool: "Select",
@@ -116,10 +148,16 @@ const translations = {
     editTextPlaceholder: "Type replacement text",
     deletePlaceholder: "Describe the content to remove",
     deleteFallback: "Remove this selected content",
+    renameDocument: "Rename",
+    renameDocumentPrompt: "Enter a new document name",
     searchAnnotations: "Search annotations",
     filterAll: "All",
     confirmClearTitle: "Delete all annotations?",
     confirmClearBody: "This removes every annotation from the list and canvas. This action cannot be undone.",
+    confirmDeleteDocumentTitle: "Delete document?",
+    confirmDeleteDocumentBody: "Deleting \"${name}\" removes the file and its annotations from this workspace.",
+    confirmDeletePageTitle: "Delete board?",
+    confirmDeletePageBody: "Deleting Page ${page} also removes annotations on that page.",
     cancel: "Cancel",
     confirmDelete: "Delete",
     unsavedAnnotation: "Save the current annotation first",
@@ -134,6 +172,14 @@ const translations = {
     expandLeft: "Expand left panel",
     collapseRight: "Collapse right panel",
     expandRight: "Expand right panel",
+    detailCallouts: "Show annotation details",
+    pasteClipboard: "Paste clipboard",
+    pasteImageHint: "This browser cannot read clipboard images from the button. Press Ctrl+V to paste.",
+    pasteNoImage: "No image found in the clipboard",
+    pastedImage: "Image pasted",
+    submitShortcut: "Submit shortcut",
+    enterSubmit: "Enter to submit",
+    ctrlEnterSubmit: "Ctrl+Enter to submit",
   },
 };
 
@@ -141,11 +187,15 @@ const svgNS = "http://www.w3.org/2000/svg";
 const storagePrefix = "pointking.annotations.";
 const lastDocumentKey = "pointking.lastDocument";
 const defaultDocumentKey = "demo:homepage-review.pdf";
+const documentCatalogStorageKey = "pointking.documents";
 const fileDatabaseName = "pointking.files";
 const fileStoreName = "documents";
 const layoutStorageKey = "pointking.layout";
 const languageStorageKey = "pointking.language";
 const themeStorageKey = "pointking.theme";
+const magnifierScaleStorageKey = "pointking.magnifierScale";
+const detailCalloutsStorageKey = "pointking.detailCallouts";
+const submitModeStorageKey = "pointking.submitMode";
 const defaultAnnotationColor = "#6e7cff";
 const annotationColors = ["#6e7cff", "#00c2a8", "#ff6b6b", "#f5a524", "#8b5cf6"];
 const annotationIntentColors = {
@@ -154,11 +204,16 @@ const annotationIntentColors = {
   deleteContent: "#ff6b6b",
 };
 const commentFilterOptions = ["all", "suggestion", "editText", "deleteContent"];
+const commentImagePreviewDelay = 450;
 
 let currentTool = "select";
 let currentLanguage = localStorage.getItem(languageStorageKey) || "zh";
 let currentTheme = localStorage.getItem(themeStorageKey) || "dark";
-let currentDocumentKey = defaultDocumentKey;
+let detailCalloutsVisible = localStorage.getItem(detailCalloutsStorageKey) === "true";
+let submitMode = localStorage.getItem(submitModeStorageKey) === "ctrlEnter" ? "ctrlEnter" : "enter";
+let currentDocumentKey = null;
+let documentCatalog = loadDocumentCatalog();
+let deletedPageIds = new Set();
 let annotations = [];
 let dragStart = null;
 let dragEndPoint = null;
@@ -168,6 +223,8 @@ let pan = { x: 0, y: 0 };
 let zoom = 1;
 let isPanning = false;
 let lastPanPoint = null;
+let spacePanActive = false;
+let pinchState = null;
 let editingAnnotationId = null;
 let regionPreviewFrame = null;
 let annotationNoticeTimer = null;
@@ -178,13 +235,19 @@ let magnifierWasShown = false;
 let magnifierPointerId = null;
 let magnifierPage = null;
 let magnifierLastClient = null;
+let magnifierScale = getStoredMagnifierScale();
 let commentSearchQuery = "";
 let commentFilterIntent = "all";
+let commentImagePreviewTimer = null;
+let mobilePanelsInitialized = false;
+let mobileAnnotationDock = null;
+let creatingBlankDocument = false;
 const pendingRegionPreviewIds = new Set();
 const collapsedCommentGroups = new Set();
+const activeCanvasPointers = new Map();
 
 pdfjs.GlobalWorkerOptions.workerSrc =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.worker.min.mjs";
+  "./vendor/pdfjs/pdf.worker.min.mjs";
 
 commentImagePreview = createCommentImagePreview();
 applyTheme();
@@ -196,8 +259,13 @@ bindResizeHandle(leftResizeHandle, "left");
 bindResizeHandle(rightResizeHandle, "right");
 bindCollapseButton(leftCollapseBtn, "left");
 bindCollapseButton(rightCollapseBtn, "right");
+syncMobilePanelState();
 renderCommentFilterTabs();
 renderLucideIcons();
+syncMobileViewportGeometry();
+setCurrentTool(currentTool);
+syncDetailToggleState();
+activateMobileAnnotationTool();
 
 languageBtn.addEventListener("click", () => {
   currentLanguage = currentLanguage === "zh" ? "en" : "zh";
@@ -235,15 +303,33 @@ canvasViewport.addEventListener("contextmenu", (event) => {
 
 document.addEventListener("pointerdown", (event) => {
   if (!canvasMenu.contains(event.target)) hideCanvasMenu();
+  closeMobilePanelsFromOutside(event);
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.code === "Space" && !isEditableTarget(event.target) && !isMobileLayout() && !hasOpenAnnotationEditor()) {
+    event.preventDefault();
+    spacePanActive = true;
+    canvasViewport.classList.add("space-panning");
+    return;
+  }
+
+  if (handleMagnifierScaleShortcut(event)) return;
+
+  if (handleToolShortcut(event)) return;
+
   if (handleDragKeyboardNudge(event)) return;
 
   if (event.key === "Escape") {
     hideCanvasMenu();
     closeConfirmDialog();
   }
+});
+
+document.addEventListener("keyup", (event) => {
+  if (event.code !== "Space") return;
+  spacePanActive = false;
+  canvasViewport.classList.remove("space-panning");
 });
 
 dropzone.addEventListener("dragover", (event) => {
@@ -267,6 +353,57 @@ fileInput.addEventListener("change", (event) => {
   if (file) loadFile(file);
 });
 
+document.addEventListener("paste", (event) => {
+  if (isEditableTarget(event.target) || event.target.closest?.(".annotation-editor")) return;
+
+  const imageFile = getClipboardImageFile(event);
+  if (!imageFile) return;
+
+  event.preventDefault();
+  addClipboardImageToBoard(imageFile);
+});
+
+mobileFileBtn.addEventListener("click", () => {
+  fileInput.click();
+  if (isMobileLayout()) setPanelCollapsed("left", true, { persist: true });
+});
+
+newDocumentBtn.addEventListener("click", createNewBlankDocument);
+placeholderFileBtn.addEventListener("click", () => fileInput.click());
+placeholderPasteBtn.addEventListener("click", async () => {
+  const result = await loadImageFromClipboard();
+  if (result === "pasted") {
+    showAnnotationNotice(t("pastedImage"));
+    return;
+  }
+  if (result === "empty") {
+    showAnnotationNotice(t("pasteNoImage"));
+    return;
+  }
+  showAnnotationNotice(t("pasteImageHint"), 2600);
+});
+
+mobileZoomSlider.addEventListener("input", () => {
+  const nextZoom = Number(mobileZoomSlider.value) / 100;
+  const rect = canvasViewport.getBoundingClientRect();
+  zoomTo(rect.left + rect.width / 2, rect.top + rect.height / 2, nextZoom);
+});
+
+mobileZoomControl.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+statusZoomSlider.addEventListener("input", () => {
+  const nextZoom = Number(statusZoomSlider.value) / 100;
+  const rect = canvasViewport.getBoundingClientRect();
+  zoomTo(rect.left + rect.width / 2, rect.top + rect.height / 2, nextZoom);
+});
+
+detailToggleBtn.addEventListener("click", () => {
+  detailCalloutsVisible = !detailCalloutsVisible;
+  localStorage.setItem(detailCalloutsStorageKey, String(detailCalloutsVisible));
+  syncDetailToggleState();
+  renderAnnotations();
+});
+
 canvasViewport.addEventListener(
   "wheel",
   (event) => {
@@ -285,11 +422,22 @@ canvasViewport.addEventListener(
 
 canvasViewport.addEventListener("pointerdown", (event) => {
   if (event.target.closest(".annotation-ui")) return;
+  if (isMobileLayout()) event.preventDefault();
+
+  activeCanvasPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+  canvasViewport.setPointerCapture?.(event.pointerId);
+  if (isMobileLayout() && activeCanvasPointers.size >= 2) {
+    event.preventDefault();
+    event.stopPropagation();
+    beginPinchZoom();
+    return;
+  }
 
   const page = event.target.closest(".doc-page");
   activePointer = event.pointerId;
 
-  if (!page || event.button === 1 || event.altKey || event.shiftKey) {
+  if (spacePanActive || !page || event.button === 1 || event.altKey || event.shiftKey) {
+    event.preventDefault();
     beginPan(event);
     return;
   }
@@ -297,6 +445,17 @@ canvasViewport.addEventListener("pointerdown", (event) => {
   startMagnifierHold(event, page);
 
   if (hasOpenAnnotationEditor()) {
+    if (!isMobileLayout()) {
+      event.preventDefault();
+      event.stopPropagation();
+      const annotationId = getCurrentEditorAnnotationId();
+      if (annotationId) cancelAnnotation(annotationId);
+      dragStart = null;
+      dragEndPoint = null;
+      dragPreview = null;
+      return;
+    }
+
     if (currentTool === "mark" && moveEmptyDraftAnnotationToPointer(event, page)) {
       event.preventDefault();
       event.stopPropagation();
@@ -320,6 +479,7 @@ canvasViewport.addEventListener("pointerdown", (event) => {
     removeEmptyDraftAnnotations();
     dragStart = null;
     dragEndPoint = null;
+    beginPan(event);
     return;
   }
 
@@ -347,6 +507,16 @@ canvasViewport.addEventListener("pointerdown", (event) => {
 });
 
 canvasViewport.addEventListener("pointermove", (event) => {
+  if (activeCanvasPointers.has(event.pointerId)) {
+    activeCanvasPointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+  }
+
+  if (pinchState) {
+    event.preventDefault();
+    updatePinchZoom();
+    return;
+  }
+
   if (event.pointerId === magnifierPointerId) {
     magnifierLastClient = { clientX: event.clientX, clientY: event.clientY };
     updateMagnifier(event);
@@ -368,6 +538,15 @@ canvasViewport.addEventListener("pointermove", (event) => {
 });
 
 canvasViewport.addEventListener("pointerup", (event) => {
+  if (canvasViewport.hasPointerCapture?.(event.pointerId)) {
+    canvasViewport.releasePointerCapture(event.pointerId);
+  }
+  activeCanvasPointers.delete(event.pointerId);
+  if (pinchState) {
+    endPinchZoom();
+    return;
+  }
+
   if (event.pointerId === magnifierPointerId) {
     stopMagnifier();
   }
@@ -401,6 +580,9 @@ canvasViewport.addEventListener("pointerup", (event) => {
     dragPreview.height = Math.max(3, dragPreview.height);
     renderAnnotations();
     focusAnnotationInput(dragPreview.id);
+  } else if (!isMobileLayout()) {
+    annotations = annotations.filter((annotation) => annotation.id !== dragPreview.id);
+    renderAnnotations();
   } else {
     dragPreview.type = "text";
     dragPreview.preview = false;
@@ -415,11 +597,30 @@ canvasViewport.addEventListener("pointerup", (event) => {
 });
 
 canvasViewport.addEventListener("pointercancel", (event) => {
+  if (canvasViewport.hasPointerCapture?.(event.pointerId)) {
+    canvasViewport.releasePointerCapture(event.pointerId);
+  }
+  activeCanvasPointers.delete(event.pointerId);
+  if (pinchState) endPinchZoom();
   if (event.pointerId === magnifierPointerId) stopMagnifier();
   dragStart = null;
   dragEndPoint = null;
   dragPreview = null;
   endPan(event);
+});
+
+canvasViewport.addEventListener("dblclick", (event) => {
+  const page = event.target.closest(".doc-page");
+  if (!isMobileLayout() && currentTool === "mark" && page && !event.target.closest(".annotation-editor, .annotation-ui")) {
+    event.preventDefault();
+    event.stopPropagation();
+    createTextAnnotationAtEvent(event, page);
+    return;
+  }
+
+  if (!isMobileLayout() || event.target.closest(".doc-page, .annotation-editor")) return;
+  event.preventDefault();
+  resetCanvasView();
 });
 
 undoBtn.addEventListener("click", () => {
@@ -484,7 +685,16 @@ shareBtn.addEventListener("click", async () => {
 window.addEventListener("resize", () => {
   updateSurfaceBounds();
   applyCanvasTransform();
+  syncMobilePanelState();
+  syncMobileViewportGeometry();
+  if (hasOpenAnnotationEditor()) renderAnnotations();
 });
+
+window.addEventListener("pageshow", () => {
+  if (isMobileLayout()) requestAnimationFrame(resetCanvasView);
+});
+
+window.visualViewport?.addEventListener("resize", syncMobileViewportGeometry);
 
 function t(key, values = {}) {
   const value = translations[currentLanguage]?.[key] || translations.en[key] || key;
@@ -497,11 +707,16 @@ function applyLanguage() {
   brandName.textContent = t("appTitle");
   brandSub.textContent = t("brandSub");
   dropTitle.textContent = t("dropTitle");
+  mobileFileText.textContent = t("chooseFile");
+  mobileFileBtn.title = t("chooseFile");
+  mobileFileBtn.setAttribute("aria-label", t("chooseFile"));
+  newDocumentBtn.textContent = t("newDocument");
+  newDocumentBtn.title = t("newDocument");
+  newDocumentBtn.setAttribute("aria-label", t("newDocument"));
   panelTitle.textContent = t("panelTitle");
   docSubtitle.textContent = t("docSubtitle");
   shareText.textContent = t("share");
   commentsTitle.textContent = t("comments");
-  placeholderProduct.textContent = t("placeholderProduct");
   placeholderTitle.textContent = t("placeholderTitle");
   placeholderCopy.textContent = t("placeholderCopy");
   commentSearch.placeholder = t("searchAnnotations");
@@ -510,6 +725,7 @@ function applyLanguage() {
   languageBtn.title = currentLanguage === "zh" ? "English" : "\u4e2d\u6587";
   languageBtn.setAttribute("aria-label", currentLanguage === "zh" ? "Switch to English" : "\u5207\u6362\u5230\u4e2d\u6587");
   updateToolLabels();
+  renderDocumentList();
   renderCommentFilterTabs();
   updateCollapseButtons();
   applyTheme();
@@ -542,13 +758,21 @@ function updateToolLabels() {
   clearBtn.setAttribute("aria-label", t("clear"));
   magnifierBtn.title = t("magnifierTool");
   magnifierBtn.setAttribute("aria-label", t("magnifierTool"));
+  detailToggleBtn.title = t("detailCallouts");
+  detailToggleBtn.setAttribute("aria-label", t("detailCallouts"));
   updateCanvasMenu();
 }
 
 function setCurrentTool(tool) {
   currentTool = tool;
+  canvasViewport.dataset.tool = tool;
   tools.forEach((item) => item.classList.toggle("active", item.dataset.tool === tool));
   canvasMenu.querySelectorAll("[data-menu-tool]").forEach((item) => item.classList.toggle("active", item.dataset.menuTool === tool));
+  if (tool === "select") stopMagnifier();
+}
+
+function activateMobileAnnotationTool() {
+  if (isMobileLayout()) setCurrentTool("mark");
 }
 
 function setMagnifierEnabled(enabled) {
@@ -558,8 +782,40 @@ function setMagnifierEnabled(enabled) {
   if (!enabled) stopMagnifier();
 }
 
+function syncDetailToggleState() {
+  app.classList.toggle("details-visible", detailCalloutsVisible);
+  detailToggleBtn.classList.toggle("active", detailCalloutsVisible);
+  detailToggleBtn.setAttribute("aria-pressed", String(detailCalloutsVisible));
+}
+
+function handleToolShortcut(event) {
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (isEditableTarget(event.target) || hasOpenAnnotationEditor()) return false;
+
+  const key = event.key.toLowerCase();
+  if (key === "t") {
+    event.preventDefault();
+    setCurrentTool("mark");
+    return true;
+  }
+
+  if (key === "v") {
+    event.preventDefault();
+    setCurrentTool("select");
+    return true;
+  }
+
+  if (key === "z") {
+    event.preventDefault();
+    setMagnifierEnabled(!magnifierEnabled);
+    return true;
+  }
+
+  return false;
+}
+
 function startMagnifierHold(event, page) {
-  if (!magnifierEnabled || event.button !== 0) return;
+  if (!magnifierEnabled || currentTool === "select" || event.button !== 0) return;
 
   window.clearTimeout(magnifierTimer);
   magnifierActive = false;
@@ -588,7 +844,7 @@ function updateMagnifier(event) {
   const yRatio = clamp((event.clientY - pageRect.top) / pageRect.height, 0, 1);
   const sx = xRatio * source.width;
   const sy = yRatio * source.height;
-  const sample = Math.max(18, Math.min(source.width, source.height) * 0.075);
+  const sample = Math.max(18, lensCanvas.width / magnifierScale);
   const sw = Math.min(sample, source.width);
   const sh = Math.min(sample, source.height);
   const sourceX = clamp(sx - sw / 2, 0, source.width - sw);
@@ -603,6 +859,40 @@ function updateMagnifier(event) {
   const size = 180;
   magnifierLens.style.left = `${Math.min(window.innerWidth - size - 12, event.clientX + 18)}px`;
   magnifierLens.style.top = `${Math.max(12, event.clientY - size - 18)}px`;
+  magnifierLens.dataset.scale = `${magnifierScale}x`;
+}
+
+function handleMagnifierScaleShortcut(event) {
+  if (magnifierPointerId === null || isEditableTarget(event.target) || hasOpenAnnotationEditor()) return false;
+  const numericScale = Number(event.key);
+  let nextScale = null;
+
+  if (Number.isInteger(numericScale) && numericScale >= 1 && numericScale <= 4) {
+    nextScale = numericScale;
+  } else if (event.key === "-" || event.code === "Minus" || event.code === "NumpadSubtract") {
+    nextScale = magnifierScale - 1;
+  } else if (event.key === "+" || event.code === "NumpadAdd") {
+    nextScale = magnifierScale + 1;
+  }
+
+  if (nextScale === null) return false;
+
+  event.preventDefault();
+  setMagnifierScale(nextScale);
+  if (magnifierActive && magnifierLastClient) updateMagnifier(magnifierLastClient);
+  return true;
+}
+
+function getStoredMagnifierScale() {
+  const stored = Number(localStorage.getItem(magnifierScaleStorageKey));
+  return Number.isFinite(stored) ? clamp(Math.round(stored), 1, 4) : 2;
+}
+
+function setMagnifierScale(scale) {
+  magnifierScale = clamp(Math.round(scale), 1, 4);
+  try {
+    localStorage.setItem(magnifierScaleStorageKey, String(magnifierScale));
+  } catch {}
 }
 
 function stopMagnifier() {
@@ -682,6 +972,58 @@ function createConfirmDialog() {
   return { overlay, title, body, cancel, confirm };
 }
 
+function createRenameDialog() {
+  const overlay = document.createElement("div");
+  overlay.className = "confirm-modal rename-modal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+
+  const dialog = document.createElement("div");
+  dialog.className = "confirm-dialog rename-dialog";
+
+  const title = document.createElement("strong");
+  title.className = "confirm-title";
+
+  const input = document.createElement("input");
+  input.className = "rename-input";
+  input.type = "text";
+  input.autocomplete = "off";
+
+  const actions = document.createElement("div");
+  actions.className = "confirm-actions";
+
+  const cancel = document.createElement("button");
+  cancel.className = "confirm-cancel";
+  cancel.type = "button";
+
+  const confirm = document.createElement("button");
+  confirm.className = "confirm-rename";
+  confirm.type = "button";
+
+  actions.append(cancel, confirm);
+  dialog.append(title, input, actions);
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  overlay.addEventListener("pointerdown", (event) => {
+    if (event.target === overlay) closeRenameDialog();
+  });
+  cancel.addEventListener("click", closeRenameDialog);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeRenameDialog();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirm.click();
+    }
+  });
+
+  return { overlay, title, input, cancel, confirm };
+}
+
 function showConfirmDialog({ title, body, confirmLabel, onConfirm }) {
   confirmDialog.title.textContent = title;
   confirmDialog.body.textContent = body;
@@ -700,8 +1042,30 @@ function closeConfirmDialog() {
   confirmDialog.confirm.onclick = null;
 }
 
+function showRenameDialog({ title, value, confirmLabel, onConfirm }) {
+  renameDialog.title.textContent = title;
+  renameDialog.input.value = value;
+  renameDialog.cancel.textContent = t("cancel");
+  renameDialog.confirm.textContent = confirmLabel;
+  renameDialog.confirm.onclick = () => {
+    const nextValue = renameDialog.input.value.trim();
+    closeRenameDialog();
+    onConfirm?.(nextValue);
+  };
+  renameDialog.overlay.classList.add("open");
+  requestAnimationFrame(() => {
+    renameDialog.input.focus();
+    renameDialog.input.select();
+  });
+}
+
+function closeRenameDialog() {
+  renameDialog.overlay.classList.remove("open");
+  renameDialog.confirm.onclick = null;
+}
+
 function hasOpenAnnotationEditor() {
-  return !!pageStack.querySelector(".annotation-editor");
+  return !!document.querySelector(".annotation-editor");
 }
 
 function getCurrentEditorAnnotationId() {
@@ -741,19 +1105,23 @@ function moveEmptyDraftAnnotationToPointer(event, page) {
 }
 
 function isDraftEditorEmpty(annotationId) {
-  const input = pageStack.querySelector(`.annotation-editor[data-annotation-id="${annotationId}"] textarea`);
+  const input = getAnnotationEditor(annotationId)?.querySelector("textarea");
   const annotation = annotations.find((item) => item.id === annotationId);
   return !input?.value.trim() && !hasReferenceImages(annotation);
 }
 
 function showUnsavedAnnotationNotice() {
-  annotationNotice.textContent = t("unsavedAnnotation");
+  showAnnotationNotice(t("unsavedAnnotation"));
+}
+
+function showAnnotationNotice(message, duration = 1800) {
+  annotationNotice.textContent = message;
   annotationNotice.classList.add("open");
 
   window.clearTimeout(annotationNoticeTimer);
   annotationNoticeTimer = window.setTimeout(() => {
     annotationNotice.classList.remove("open");
-  }, 1800);
+  }, duration);
 }
 
 function updateCanvasMenu() {
@@ -803,6 +1171,30 @@ function updateAnnotationContextMenu(annotationId) {
   renderLucideIcons();
 }
 
+function updateDocumentContextMenu(documentKey) {
+  const items = [
+    ["rename", "pencil", t("renameDocument")],
+    ["delete", "trash-2", t("deleteAnnotation")],
+  ];
+
+  canvasMenu.replaceChildren(
+    ...items.map(([action, icon, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.documentAction = action;
+      if (action === "delete") button.classList.add("danger");
+      button.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`;
+      button.addEventListener("click", () => {
+        if (action === "rename") renameDocumentByKey(documentKey);
+        if (action === "delete") confirmDeleteDocument(documentKey);
+        hideCanvasMenu();
+      });
+      return button;
+    }),
+  );
+  renderLucideIcons();
+}
+
 function showCanvasMenu(clientX, clientY) {
   updateCanvasMenu();
   positionCanvasMenu(clientX, clientY);
@@ -810,6 +1202,11 @@ function showCanvasMenu(clientX, clientY) {
 
 function showAnnotationContextMenu(clientX, clientY, annotationId) {
   updateAnnotationContextMenu(annotationId);
+  positionCanvasMenu(clientX, clientY);
+}
+
+function showDocumentContextMenu(clientX, clientY, documentKey) {
+  updateDocumentContextMenu(documentKey);
   positionCanvasMenu(clientX, clientY);
 }
 
@@ -844,6 +1241,82 @@ function endPan(event) {
   dragStart = null;
 }
 
+function beginPinchZoom() {
+  cancelTransientCanvasAction();
+  stopMagnifier();
+  if (isPanning) {
+    isPanning = false;
+    activePointer = null;
+    lastPanPoint = null;
+    canvasViewport.classList.remove("dragging");
+  }
+
+  const points = getPinchPoints();
+  if (!points) return;
+
+  pinchState = {
+    distance: getTouchDistance(points),
+    center: getTouchCenter(points),
+    zoom,
+  };
+}
+
+function updatePinchZoom() {
+  const points = getPinchPoints();
+  if (!points || !pinchState?.distance) return;
+
+  const distance = getTouchDistance(points);
+  const center = getTouchCenter(points);
+  const previousCenter = pinchState.center || center;
+  zoomTo(center.clientX, center.clientY, pinchState.zoom * (distance / pinchState.distance));
+  pan.x += center.clientX - previousCenter.clientX;
+  pan.y += center.clientY - previousCenter.clientY;
+  pinchState.center = center;
+  applyCanvasTransform();
+}
+
+function endPinchZoom() {
+  if (activeCanvasPointers.size >= 2) {
+    const points = getPinchPoints();
+    if (points) {
+      pinchState = {
+        distance: getTouchDistance(points),
+        center: getTouchCenter(points),
+        zoom,
+      };
+      return;
+    }
+  }
+
+  pinchState = null;
+}
+
+function getPinchPoints() {
+  const points = [...activeCanvasPointers.values()].slice(0, 2);
+  return points.length === 2 ? points : null;
+}
+
+function getTouchDistance([first, second]) {
+  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
+function getTouchCenter([first, second]) {
+  return {
+    clientX: (first.clientX + second.clientX) / 2,
+    clientY: (first.clientY + second.clientY) / 2,
+  };
+}
+
+function cancelTransientCanvasAction() {
+  if (dragPreview?.preview) {
+    annotations = annotations.filter((annotation) => annotation.id !== dragPreview.id);
+    renderAnnotations();
+  }
+  dragStart = null;
+  dragEndPoint = null;
+  dragPreview = null;
+}
+
 function centerCanvas() {
   updateSurfaceBounds();
   const viewport = canvasViewport.getBoundingClientRect();
@@ -856,6 +1329,19 @@ function centerCanvas() {
   applyCanvasTransform();
 }
 
+function resetCanvasView() {
+  updateSurfaceBounds();
+  zoom = isMobileLayout() ? getMobileDefaultZoom() : 1;
+  centerCanvas();
+}
+
+function getMobileDefaultZoom() {
+  const viewport = canvasViewport.getBoundingClientRect();
+  const stack = pageStack.getBoundingClientRect();
+  if (!viewport.width || !stack.width) return 1;
+  return clamp((viewport.width - 28) / stack.width, 0.35, 1);
+}
+
 function updateSurfaceBounds() {
   const minWidth = matchMedia("(max-width: 560px)").matches ? 2600 : 5200;
   const minHeight = matchMedia("(max-width: 560px)").matches ? 3600 : 5200;
@@ -866,12 +1352,16 @@ function updateSurfaceBounds() {
 }
 
 function zoomAt(clientX, clientY, deltaY) {
+  const factor = Math.exp(-deltaY * 0.0012);
+  zoomTo(clientX, clientY, zoom * factor);
+}
+
+function zoomTo(clientX, clientY, nextZoom) {
   const rect = canvasViewport.getBoundingClientRect();
   const pointerX = clientX - rect.left;
   const pointerY = clientY - rect.top;
   const oldZoom = zoom;
-  const factor = Math.exp(-deltaY * 0.0012);
-  zoom = clamp(zoom * factor, 0.35, 2.6);
+  zoom = clamp(nextZoom, 0.35, 2.6);
 
   const worldX = (pointerX - pan.x) / oldZoom;
   const worldY = (pointerY - pan.y) / oldZoom;
@@ -884,7 +1374,16 @@ function applyCanvasTransform() {
   canvasSurface.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
   canvasSurface.style.setProperty("--inverse-zoom", String(1 / zoom));
   canvasSurface.style.setProperty("--editor-offset-y", `${-10 / zoom}px`);
-  zoomReadout.textContent = `${Math.round(zoom * 100)}%`;
+  const zoomText = `${Math.round(zoom * 100)}%`;
+  zoomReadout.textContent = zoomText;
+  statusZoom.textContent = zoomText;
+  syncMobileZoomSlider();
+}
+
+function syncMobileZoomSlider() {
+  const value = String(Math.round(zoom * 100));
+  if (mobileZoomSlider) mobileZoomSlider.value = value;
+  if (statusZoomSlider) statusZoomSlider.value = value;
 }
 
 function bindResizeHandle(handle, side) {
@@ -921,16 +1420,21 @@ function bindCollapseButton(button, side) {
   button.addEventListener("pointerdown", (event) => event.stopPropagation());
   button.addEventListener("click", (event) => {
     event.stopPropagation();
-    setPanelCollapsed(side, !isPanelCollapsed(side));
-    saveLayout();
+    const willCollapse = !isPanelCollapsed(side);
+    if (isMobileLayout() && !willCollapse) {
+      setPanelCollapsed(side === "left" ? "right" : "left", true, { persist: false });
+    }
+    setPanelCollapsed(side, willCollapse, { persist: true });
   });
 }
 
-function setPanelCollapsed(side, collapsed) {
+function setPanelCollapsed(side, collapsed, options = {}) {
   app.classList.toggle(`${side}-collapsed`, collapsed);
   updateCollapseButtons();
   updateSurfaceBounds();
   applyCanvasTransform();
+  syncMobilePanelState();
+  if (options.persist) saveLayout();
 }
 
 function isPanelCollapsed(side) {
@@ -990,9 +1494,50 @@ function restoreLayout() {
     app.classList.toggle("left-collapsed", Boolean(layout.leftCollapsed));
     app.classList.toggle("right-collapsed", Boolean(layout.rightCollapsed));
     updateCollapseButtons();
+    syncMobilePanelState();
   } catch {
     localStorage.removeItem(layoutStorageKey);
   }
+}
+
+function isMobileLayout() {
+  return window.matchMedia("(max-width: 560px)").matches;
+}
+
+function isEditableTarget(target) {
+  return Boolean(target?.closest?.("input, textarea, [contenteditable='true']"));
+}
+
+function syncMobilePanelState() {
+  if (!isMobileLayout()) {
+    app.classList.remove("mobile-panel-open");
+    document.documentElement.classList.remove("mobile-panel-open");
+    mobilePanelsInitialized = false;
+    return;
+  }
+
+  if (!mobilePanelsInitialized) {
+    app.classList.add("left-collapsed", "right-collapsed");
+    mobilePanelsInitialized = true;
+    updateCollapseButtons();
+  }
+
+  if (!isPanelCollapsed("left") && !isPanelCollapsed("right")) {
+    app.classList.add("left-collapsed");
+    updateCollapseButtons();
+  }
+
+  const open = !isPanelCollapsed("left") || !isPanelCollapsed("right");
+  app.classList.toggle("mobile-panel-open", open);
+  document.documentElement.classList.toggle("mobile-panel-open", open);
+}
+
+function closeMobilePanelsFromOutside(event) {
+  if (!isMobileLayout() || !app.classList.contains("mobile-panel-open")) return;
+  if (event.target.closest(".rail, .comments, .collapse-toggle, .mobile-file-btn, .annotation-editor, .canvas-menu")) return;
+
+  setPanelCollapsed("left", true, { persist: true });
+  setPanelCollapsed("right", true, { persist: true });
 }
 
 function saveLayout() {
@@ -1037,7 +1582,22 @@ function addAnnotation(annotation) {
   return annotation;
 }
 
+function createTextAnnotationAtEvent(event, page) {
+  removeEmptyDraftAnnotations();
+  const point = getPagePoint(event, page);
+  const annotation = addAnnotation({
+    type: "text",
+    pageId: page.dataset.pageId,
+    x: clamp(point.x, 0, 100),
+    y: clamp(point.y, 0, 100),
+    text: "",
+    draft: true,
+  });
+  focusAnnotationInput(annotation.id);
+}
+
 function renderAnnotations() {
+  clearMobileAnnotationDock();
   pageStack.querySelectorAll(".overlay").forEach((overlay) => {
     overlay.replaceChildren();
     overlay.setAttribute("viewBox", "0 0 100 100");
@@ -1064,7 +1624,8 @@ function renderAnnotations() {
   });
 
   renderCommentGroups(groupedComments);
-  commentCount.textContent = String(renderedCommentCount);
+  commentCount.textContent = `(${renderedCommentCount})`;
+  statusCommentCount.textContent = String(renderedCommentCount);
   renderLucideIcons();
 }
 
@@ -1169,8 +1730,9 @@ function drawMark(layer, annotation) {
   }
   layer.append(box);
   if (shouldShowAnnotationEditor(annotation)) {
-    layer.append(createAnnotationEditor("mark-input", "mark-editor", annotation));
+    appendAnnotationEditor(layer, createAnnotationEditor("mark-input", "mark-editor", annotation));
   }
+  drawAnnotationDetailCallout(layer, annotation);
   renderLucideIcons();
 }
 
@@ -1346,9 +1908,73 @@ function drawTextNote(layer, annotation) {
   }
   layer.append(note);
   if (shouldShowAnnotationEditor(annotation)) {
-    layer.append(createAnnotationEditor("text-input", "text-editor", annotation));
+    appendAnnotationEditor(layer, createAnnotationEditor("text-input", "text-editor", annotation));
   }
+  drawAnnotationDetailCallout(layer, annotation);
   renderLucideIcons();
+}
+
+function drawAnnotationDetailCallout(layer, annotation) {
+  if (!detailCalloutsVisible || annotation.draft || annotation.preview || !isPersistableAnnotation(annotation)) return;
+
+  const side = getAnnotationDetailSide(annotation);
+  const anchor = getAnnotationDetailAnchor(annotation, side);
+  const color = getAnnotationColor(annotation);
+  const calloutY = clamp(anchor.y, 5, 95);
+  const endX = side === "left" ? -9 : 109;
+  const controlX = side === "left" ? -4 : 104;
+  const line = createSvg("svg", {
+    class: "annotation-detail-line",
+    viewBox: "0 0 100 100",
+    preserveAspectRatio: "none",
+    "aria-hidden": "true",
+  });
+  line.style.setProperty("--annotation-color", color);
+  line.append(
+    createSvg("path", {
+      d: `M ${anchor.x} ${anchor.y} C ${controlX} ${anchor.y}, ${controlX} ${calloutY}, ${endX} ${calloutY}`,
+      class: "detail-line-path",
+    }),
+  );
+
+  const callout = document.createElement("div");
+  callout.className = "annotation-detail-callout";
+  callout.classList.add(`detail-${side}`);
+  callout.dataset.annotationId = annotation.id;
+  if (side === "left") {
+    callout.style.right = "110%";
+  } else {
+    callout.style.left = "110%";
+  }
+  callout.style.top = `${calloutY}%`;
+  callout.style.setProperty("--annotation-color", color);
+
+  const title = document.createElement("strong");
+  title.textContent = getAnnotationIntentLabel(annotation);
+  const text = document.createElement("p");
+  text.textContent = annotation.text || getAnnotationFallbackText(annotation);
+  callout.append(title, text);
+
+  layer.append(line, callout);
+}
+
+function getAnnotationDetailSide(annotation) {
+  const centerX = annotation.type === "mark" ? annotation.x + annotation.width / 2 : annotation.x;
+  return centerX < 50 ? "left" : "right";
+}
+
+function getAnnotationDetailAnchor(annotation, side) {
+  if (annotation.type === "mark") {
+    return {
+      x: side === "left" ? annotation.x : annotation.x + annotation.width,
+      y: annotation.y + annotation.height / 2,
+    };
+  }
+
+  return {
+    x: annotation.x,
+    y: annotation.y,
+  };
 }
 
 function shouldShowAnnotationEditor(annotation) {
@@ -1381,6 +2007,7 @@ function createAnnotationTooltip(annotation) {
 function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   const editor = document.createElement("div");
   editor.className = `annotation-editor ${editorClassName}`;
+  editor.classList.toggle("mobile-docked", isMobileLayout());
   editor.dataset.annotationId = annotation.id;
   editor.style.setProperty("--annotation-color", getAnnotationColor(annotation));
   positionAnnotationEditor(editor, annotation);
@@ -1392,6 +2019,35 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   saveButton.setAttribute("aria-label", currentLanguage === "zh" ? "\u4fdd\u5b58\u6279\u6ce8" : "Save annotation");
   saveButton.append(createIconPlaceholder("check"));
 
+  const saveGroup = document.createElement("div");
+  saveGroup.className = "save-annotation-group";
+  const shortcutButton = document.createElement("button");
+  shortcutButton.className = "save-shortcut-toggle";
+  shortcutButton.type = "button";
+  shortcutButton.title = t("submitShortcut");
+  shortcutButton.setAttribute("aria-label", t("submitShortcut"));
+  shortcutButton.setAttribute("aria-expanded", "false");
+  shortcutButton.append(createIconPlaceholder("chevron-up"));
+  const shortcutMenu = createSubmitShortcutMenu(() => {
+    shortcutMenu.classList.remove("open");
+    shortcutButton.setAttribute("aria-expanded", "false");
+    input.focus();
+  });
+  saveGroup.append(saveButton, shortcutButton, shortcutMenu);
+
+  const pasteButton = document.createElement("button");
+  pasteButton.className = "paste-annotation";
+  pasteButton.type = "button";
+  pasteButton.title = t("pasteClipboard");
+  pasteButton.setAttribute("aria-label", t("pasteClipboard"));
+  pasteButton.append(createIconPlaceholder("clipboard-paste"));
+
+  const closeButton = document.createElement("button");
+  closeButton.className = "close-annotation";
+  closeButton.type = "button";
+  closeButton.setAttribute("aria-label", currentLanguage === "zh" ? "\u5173\u95ed\u6279\u6ce8" : "Close annotation");
+  closeButton.append(createIconPlaceholder("x"));
+
   const tabs = document.createElement("div");
   tabs.className = "annotation-tabs";
   const tabItems = [
@@ -1401,6 +2057,15 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   ];
 
   const activeTabItem = tabItems.find(([mode]) => mode === activeEditorMode) || tabItems[0];
+  const activateEditorMode = (mode, placeholder, tab, { focusInput = false } = {}) => {
+    if (activeEditorMode === mode) return;
+    activeEditorMode = mode;
+    input.placeholder = placeholder;
+    tabs.querySelectorAll(".annotation-tab").forEach((item) => item.classList.toggle("active", item === tab));
+    previewAnnotationIntent(annotation.id, activeEditorMode);
+    updateSaveState();
+    if (focusInput) input.focus();
+  };
 
   tabItems.forEach(([mode, label, placeholder]) => {
     const tab = document.createElement("button");
@@ -1415,42 +2080,53 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
     tab.classList.toggle("active", mode === activeTabItem[0]);
     if (mode === "editText") tab.classList.add("edit");
     if (mode === "deleteContent") tab.classList.add("danger");
-    tab.addEventListener("click", () => {
-      activeEditorMode = mode;
-      input.placeholder = placeholder;
-      tabs.querySelectorAll(".annotation-tab").forEach((item) => item.classList.toggle("active", item === tab));
-      previewAnnotationIntent(annotation.id, activeEditorMode);
-      updateSaveState();
-      input.focus();
+    tab.addEventListener("pointerenter", (event) => {
+      if (event.pointerType === "touch") return;
+      activateEditorMode(mode, placeholder, tab);
     });
+    tab.addEventListener("focus", () => activateEditorMode(mode, placeholder, tab));
+    tab.addEventListener("click", () => activateEditorMode(mode, placeholder, tab, { focusInput: true }));
     tabs.append(tab);
   });
+  tabs.append(closeButton);
 
   const input = document.createElement("textarea");
   input.className = inputClassName;
-  input.rows = 1;
+  input.rows = 2;
   input.placeholder = activeTabItem[2];
   input.value = annotation.text || "";
   const inputRow = document.createElement("div");
   inputRow.className = "annotation-input-row";
+  const inputActions = document.createElement("div");
+  inputActions.className = "annotation-input-actions";
+  const inlineReferences = createInlineReferenceList(annotation);
   const body = document.createElement("div");
   body.className = "editor-body";
   const references = createReferenceList(annotation);
+  const resizeInput = () => autoResizeAnnotationInput(input);
   const updateSaveState = () => {
-    saveButton.classList.toggle(
-      "visible",
-      activeEditorMode === "deleteContent" || input.value.trim().length > 0 || hasReferenceImages(annotation),
-    );
+    resizeInput();
+    const canSave = activeEditorMode === "deleteContent" || input.value.trim().length > 0 || hasReferenceImages(annotation);
+    saveButton.classList.toggle("visible", canSave);
+    saveGroup.classList.toggle("visible", canSave);
   };
 
   editor.addEventListener("pointerdown", (event) => event.stopPropagation());
   saveButton.addEventListener("click", () => commitAnnotation(annotation.id, input.value, activeEditorMode));
+  shortcutButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    const open = !shortcutMenu.classList.contains("open");
+    shortcutMenu.classList.toggle("open", open);
+    shortcutButton.setAttribute("aria-expanded", String(open));
+  });
+  pasteButton.addEventListener("click", () => pasteClipboardIntoAnnotation(input, annotation, references, inlineReferences, updateSaveState));
+  closeButton.addEventListener("click", () => cancelAnnotation(annotation.id));
   input.addEventListener("input", updateSaveState);
-  input.addEventListener("paste", (event) => handleAnnotationPaste(event, annotation, references, updateSaveState));
+  input.addEventListener("paste", (event) => handleAnnotationPaste(event, annotation, references, inlineReferences, updateSaveState));
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
+    if (handleAnnotationSubmitKey(event, input, updateSaveState)) {
       commitAnnotation(annotation.id, input.value, activeEditorMode);
+      return;
     }
 
     if (event.key === "Escape") {
@@ -1459,7 +2135,8 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
     }
   });
 
-  inputRow.append(input, saveButton);
+  inputActions.append(pasteButton, saveGroup);
+  inputRow.append(input, inlineReferences, inputActions);
   body.append(tabs, inputRow, references);
   editor.append(body);
   updateSaveState();
@@ -1467,21 +2144,135 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
 }
 
 function positionAnnotationEditor(editor, annotation) {
-  editor.style.top = `${annotation.y}%`;
-
-  if (annotation.type === "mark") {
-    const openToLeft = annotation.x + annotation.width > 70;
-    editor.classList.toggle("flipped", openToLeft);
-    editor.style.left = openToLeft ? `calc(${annotation.x}% - 10px)` : `calc(${annotation.x + annotation.width}% + 10px)`;
+  if (isMobileLayout()) {
+    editor.classList.remove("flipped");
+    editor.style.left = "";
+    editor.style.top = "";
     return;
   }
 
-  editor.style.left = `calc(${annotation.x}% + 14px)`;
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
+  if (!page) return;
+
+  const pageRect = page.getBoundingClientRect();
+  const viewportRect = canvasViewport.getBoundingClientRect();
+  if (!pageRect.width || !pageRect.height || !viewportRect.width || !viewportRect.height) return;
+
+  const editorWidth = parseFloat(getComputedStyle(editor).width) || 280;
+  const editorHeight = editor.getBoundingClientRect().height || 112;
+  const viewportPadding = 12;
+  const editorGap = 10;
+  const editorWidthPct = (editorWidth / pageRect.width) * 100;
+  const editorHeightPct = (editorHeight / pageRect.height) * 100;
+  const gapPct = (editorGap / pageRect.width) * 100;
+  const minLeft = ((viewportRect.left + viewportPadding - pageRect.left) / pageRect.width) * 100;
+  const maxLeft = ((viewportRect.right - viewportPadding - editorWidth - pageRect.left) / pageRect.width) * 100;
+  const minTop = ((viewportRect.top + viewportPadding - pageRect.top) / pageRect.height) * 100;
+  const maxTop = ((viewportRect.bottom - viewportPadding - editorHeight - pageRect.top) / pageRect.height) * 100;
+  const clampToVisible = (value, min, max) => (max < min ? min : clamp(value, min, max));
+
+  editor.classList.remove("flipped");
+  if (annotation.type === "mark") {
+    const markerLeftClient = pageRect.left + (annotation.x / 100) * pageRect.width;
+    const markerRightClient = pageRect.left + ((annotation.x + annotation.width) / 100) * pageRect.width;
+    const rightSpace = viewportRect.right - viewportPadding - markerRightClient;
+    const leftSpace = markerLeftClient - viewportRect.left - viewportPadding;
+    const openToLeft = rightSpace < editorWidth + editorGap && leftSpace > rightSpace;
+    const desiredLeft = openToLeft
+      ? annotation.x - gapPct - editorWidthPct
+      : annotation.x + annotation.width + gapPct;
+    editor.style.left = `${clampToVisible(desiredLeft, minLeft, maxLeft)}%`;
+    editor.style.top = `${clampToVisible(annotation.y, minTop, maxTop)}%`;
+    return;
+  }
+
+  const desiredTextLeft = annotation.x + ((14 / pageRect.width) * 100);
+  editor.style.left = `${clampToVisible(desiredTextLeft, minLeft, maxLeft)}%`;
+  editor.style.top = `${clampToVisible(annotation.y, minTop, maxTop)}%`;
 }
 
 function syncAnnotationEditorPosition(annotation) {
-  const editor = pageStack.querySelector(`.annotation-editor[data-annotation-id="${annotation.id}"]`);
+  const editor = getAnnotationEditor(annotation.id);
   if (editor) positionAnnotationEditor(editor, annotation);
+}
+
+function appendAnnotationEditor(layer, editor) {
+  if (isMobileLayout()) {
+    ensureMobileAnnotationDock().append(editor);
+    return;
+  }
+
+  layer.append(editor);
+  const annotation = annotations.find((item) => item.id === editor.dataset.annotationId);
+  if (annotation) requestAnimationFrame(() => positionAnnotationEditor(editor, annotation));
+}
+
+function ensureMobileAnnotationDock() {
+  if (mobileAnnotationDock?.isConnected) return mobileAnnotationDock;
+
+  mobileAnnotationDock = document.createElement("div");
+  mobileAnnotationDock.className = "mobile-annotation-dock";
+  app.insertBefore(mobileAnnotationDock, mobileZoomControl);
+  syncMobileViewportGeometry();
+  return mobileAnnotationDock;
+}
+
+function clearMobileAnnotationDock() {
+  mobileAnnotationDock?.replaceChildren();
+}
+
+function getAnnotationEditor(annotationId) {
+  return document.querySelector(`.annotation-editor[data-annotation-id="${annotationId}"]`);
+}
+
+function createSubmitShortcutMenu(onSelect) {
+  const menu = document.createElement("div");
+  menu.className = "save-shortcut-menu";
+  menu.setAttribute("role", "menu");
+
+  [
+    ["enter", t("enterSubmit")],
+    ["ctrlEnter", t("ctrlEnterSubmit")],
+  ].forEach(([mode, label]) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.dataset.submitMode = mode;
+    item.classList.toggle("active", submitMode === mode);
+    item.textContent = label;
+    item.addEventListener("click", () => {
+      submitMode = mode;
+      localStorage.setItem(submitModeStorageKey, submitMode);
+      menu.querySelectorAll("button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.submitMode === submitMode);
+      });
+      onSelect?.();
+    });
+    menu.append(item);
+  });
+
+  return menu;
+}
+
+function handleAnnotationSubmitKey(event, input, onChange) {
+  if (event.key !== "Enter") return false;
+
+  const withModifier = event.ctrlKey || event.metaKey;
+  if (submitMode === "enter") {
+    event.preventDefault();
+    if (withModifier) {
+      insertTextAtCursor(input, "\n");
+      onChange?.();
+      return false;
+    }
+    return true;
+  }
+
+  if (withModifier) {
+    event.preventDefault();
+    return true;
+  }
+
+  return false;
 }
 
 function getAnnotationVisualElement(annotationId) {
@@ -1491,45 +2282,174 @@ function getAnnotationVisualElement(annotationId) {
 function createReferenceList(annotation) {
   const list = document.createElement("div");
   list.className = "reference-list";
-  (annotation.images || []).forEach((src) => {
-    const image = document.createElement("img");
-    image.className = "reference-image";
-    image.src = src;
-    image.alt = currentLanguage === "zh" ? "\u53c2\u8003\u56fe" : "Reference image";
-    list.append(image);
-  });
+  syncReferenceListLayout(list, annotation);
+  (annotation.images || []).forEach((src, index) => list.append(createReferenceImage(src, index, "reference-image")));
   return list;
 }
 
-function handleAnnotationPaste(event, annotation, references, onChange) {
+function createInlineReferenceList(annotation) {
+  const list = document.createElement("div");
+  list.className = "inline-reference-list";
+  (annotation.images || []).forEach((src, index) => list.append(createReferenceImage(src, index, "inline-reference-image")));
+  return list;
+}
+
+function createReferenceImage(src, index, className) {
+  const image = document.createElement("img");
+  image.className = className;
+  image.src = src;
+  image.dataset.referenceIndex = String(index);
+  image.alt = currentLanguage === "zh" ? "\u53c2\u8003\u56fe" : "Reference image";
+  bindReferenceImageHighlight(image);
+  return image;
+}
+
+function bindReferenceImageHighlight(image) {
+  image.addEventListener("pointerenter", () => setReferenceImageHighlight(image, true));
+  image.addEventListener("pointerleave", () => setReferenceImageHighlight(image, false));
+  image.addEventListener("focus", () => setReferenceImageHighlight(image, true));
+  image.addEventListener("blur", () => setReferenceImageHighlight(image, false));
+}
+
+function setReferenceImageHighlight(image, active) {
+  const editor = image.closest(".annotation-editor");
+  const index = image.dataset.referenceIndex;
+  if (!editor || index == null) return;
+
+  editor.querySelectorAll(`[data-reference-index="${CSS.escape(index)}"]`).forEach((item) => {
+    item.classList.toggle("reference-highlighted", active);
+  });
+}
+
+function syncReferenceListLayout(list, annotation) {
+  list.classList.toggle("compact", (annotation.images || []).length > 2);
+}
+
+function autoResizeAnnotationInput(input) {
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
+}
+
+function handleAnnotationPaste(event, annotation, references, inlineReferences, onChange) {
   const imageItems = [...event.clipboardData?.items || []].filter((item) => item.type.startsWith("image/"));
   if (!imageItems.length) return;
 
   event.preventDefault();
-  annotation.images ||= [];
 
   imageItems.forEach((item) => {
     const file = item.getAsFile();
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result);
-      annotation.images.push(src);
-      const image = document.createElement("img");
-      image.className = "reference-image";
-      image.src = src;
-      image.alt = currentLanguage === "zh" ? "\u53c2\u8003\u56fe" : "Reference image";
-      references.append(image);
-      onChange?.();
-      if (!annotation.draft) {
-        touchAnnotation(annotation);
-        saveAnnotations();
-        renderAnnotations();
-      }
-    };
-    reader.readAsDataURL(file);
+    if (file) addReferenceImageFile(file, annotation, references, inlineReferences, onChange);
   });
+}
+
+async function pasteClipboardIntoAnnotation(input, annotation, references, inlineReferences, onChange) {
+  let handled = false;
+
+  try {
+    if (navigator.clipboard?.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((type) => type.startsWith("image/"));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          addReferenceImageFile(blob, annotation, references, inlineReferences, onChange);
+          handled = true;
+        }
+
+        if (item.types.includes("text/plain")) {
+          const blob = await item.getType("text/plain");
+          const text = await blob.text();
+          if (text) {
+            insertTextAtCursor(input, text);
+            handled = true;
+          }
+        }
+      }
+    }
+
+    if (!handled && navigator.clipboard?.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        insertTextAtCursor(input, text);
+        handled = true;
+      }
+    }
+  } catch {
+    input.focus();
+    return;
+  }
+
+  if (handled) {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  }
+}
+
+function insertTextAtCursor(input, text) {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+  const nextPosition = start + text.length;
+  input.setSelectionRange(nextPosition, nextPosition);
+}
+
+function getClipboardImageFile(event) {
+  const item = [...event.clipboardData?.items || []].find((entry) => entry.type.startsWith("image/"));
+  const blob = item?.getAsFile();
+  if (!blob) return null;
+
+  const extension = blob.type.split("/")[1] || "png";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return new File([blob], `clipboard-image-${timestamp}.${extension}`, {
+    type: blob.type || "image/png",
+    lastModified: Date.now(),
+  });
+}
+
+async function loadImageFromClipboard() {
+  try {
+    if (!navigator.clipboard?.read) return "unsupported";
+
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const imageType = item.types.find((type) => type.startsWith("image/"));
+      if (!imageType) continue;
+
+      const blob = await item.getType(imageType);
+      const extension = imageType.split("/")[1] || "png";
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      await addClipboardImageToBoard(
+        new File([blob], `clipboard-image-${timestamp}.${extension}`, {
+          type: imageType,
+          lastModified: Date.now(),
+        }),
+      );
+      return "pasted";
+    }
+    return "empty";
+  } catch {
+    return "unsupported";
+  }
+}
+
+function addReferenceImageFile(file, annotation, references, inlineReferences, onChange) {
+  annotation.images ||= [];
+  const reader = new FileReader();
+  reader.onload = () => {
+    const src = String(reader.result);
+    annotation.images.push(src);
+    const index = annotation.images.length - 1;
+    syncReferenceListLayout(references, annotation);
+    references.append(createReferenceImage(src, index, "reference-image"));
+    inlineReferences.append(createReferenceImage(src, index, "inline-reference-image"));
+    onChange?.();
+    if (!annotation.draft) {
+      touchAnnotation(annotation);
+      saveAnnotations();
+      renderAnnotations();
+    }
+  };
+  reader.readAsDataURL(file);
 }
 
 function getAnnotationColor(annotation) {
@@ -1546,7 +2466,7 @@ function getAnnotationIntent(annotation) {
 
 function previewAnnotationIntent(annotationId, intent) {
   const color = getAnnotationIntentColor(intent);
-  const editor = pageStack.querySelector(`.annotation-editor[data-annotation-id="${annotationId}"]`);
+  const editor = getAnnotationEditor(annotationId);
   const visual = getAnnotationVisualElement(annotationId);
   const arrow = pageStack.querySelector(`.annotation-arrow[data-annotation-id="${annotationId}"]`);
 
@@ -1591,10 +2511,39 @@ function getAnnotationArrowWidth(annotation) {
 
 function focusAnnotationInput(annotationId) {
   requestAnimationFrame(() => {
-    const input = pageStack.querySelector(`[data-annotation-id="${annotationId}"] textarea`);
-    input?.focus();
+    const input = getAnnotationEditor(annotationId)?.querySelector("textarea");
+    try {
+      input?.focus({ preventScroll: true });
+    } catch {
+      input?.focus();
+    }
     input?.select();
+    resetDocumentScroll();
   });
+}
+
+function syncMobileViewportGeometry() {
+  if (!isMobileLayout()) {
+    document.documentElement.style.removeProperty("--mobile-visual-offset-top");
+    document.documentElement.style.removeProperty("--mobile-visual-bottom-inset");
+    return;
+  }
+
+  const viewport = window.visualViewport;
+  const offsetTop = Math.max(0, viewport?.offsetTop || 0);
+  const viewportHeight = viewport?.height || window.innerHeight;
+  const bottomInset = Math.max(0, window.innerHeight - offsetTop - viewportHeight);
+
+  document.documentElement.style.setProperty("--mobile-visual-offset-top", `${offsetTop}px`);
+  document.documentElement.style.setProperty("--mobile-visual-bottom-inset", `${bottomInset}px`);
+  resetDocumentScroll();
+}
+
+function resetDocumentScroll() {
+  if (!isMobileLayout()) return;
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
 }
 
 function openAnnotationEditor(annotationId) {
@@ -2013,10 +2962,10 @@ function createCommentRegionPreview(annotation) {
   image.alt = currentLanguage === "zh" ? "\u77e9\u5f62\u533a\u57df\u622a\u56fe" : "Marked region preview";
 
   button.append(image);
-  button.addEventListener("pointerenter", (event) => showCommentImagePreview(image.src, event.currentTarget));
+  button.addEventListener("pointerenter", (event) => queueCommentImagePreview(image.src, event.currentTarget));
   button.addEventListener("pointermove", (event) => positionCommentImagePreview(event.currentTarget));
   button.addEventListener("pointerleave", hideCommentImagePreview);
-  button.addEventListener("focus", (event) => showCommentImagePreview(image.src, event.currentTarget));
+  button.addEventListener("focus", (event) => queueCommentImagePreview(image.src, event.currentTarget));
   button.addEventListener("blur", hideCommentImagePreview);
   return button;
 }
@@ -2084,10 +3033,10 @@ function createCommentReferences(annotation) {
     image.alt = currentLanguage === "zh" ? "\u53c2\u8003\u56fe" : "Reference image";
 
     button.append(image);
-    button.addEventListener("pointerenter", (event) => showCommentImagePreview(src, event.currentTarget));
+    button.addEventListener("pointerenter", (event) => queueCommentImagePreview(src, event.currentTarget));
     button.addEventListener("pointermove", (event) => positionCommentImagePreview(event.currentTarget));
     button.addEventListener("pointerleave", hideCommentImagePreview);
-    button.addEventListener("focus", (event) => showCommentImagePreview(src, event.currentTarget));
+    button.addEventListener("focus", (event) => queueCommentImagePreview(src, event.currentTarget));
     button.addEventListener("blur", hideCommentImagePreview);
     list.append(button);
   });
@@ -2104,6 +3053,14 @@ function createCommentImagePreview() {
   preview.append(image);
   document.body.append(preview);
   return preview;
+}
+
+function queueCommentImagePreview(src, anchor) {
+  window.clearTimeout(commentImagePreviewTimer);
+  positionCommentImagePreview(anchor);
+  commentImagePreviewTimer = window.setTimeout(() => {
+    showCommentImagePreview(src, anchor);
+  }, commentImagePreviewDelay);
 }
 
 function showCommentImagePreview(src, anchor) {
@@ -2127,6 +3084,8 @@ function positionCommentImagePreview(anchor) {
 }
 
 function hideCommentImagePreview() {
+  window.clearTimeout(commentImagePreviewTimer);
+  commentImagePreviewTimer = null;
   commentImagePreview.classList.remove("open");
 }
 
@@ -2306,17 +3265,18 @@ function createAnnotationFocusMask(annotation) {
   mask.append(createSvg("rect", { x: "0", y: "0", width: "100", height: "100", fill: "white" }));
 
   if (annotation.type === "mark") {
+    const inset = 0.35;
     mask.append(
       createSvg("rect", {
-        x: String(annotation.x),
-        y: String(annotation.y),
-        width: String(annotation.width),
-        height: String(annotation.height),
+        x: String(clamp(annotation.x - inset, 0, 100)),
+        y: String(clamp(annotation.y - inset, 0, 100)),
+        width: String(clamp(annotation.width + inset * 2, 0, 100)),
+        height: String(clamp(annotation.height + inset * 2, 0, 100)),
         fill: "black",
       }),
     );
   } else {
-    mask.append(createSvg("circle", { cx: String(annotation.x), cy: String(annotation.y), r: "2.8", fill: "black" }));
+    mask.append(createSvg("circle", { cx: String(annotation.x), cy: String(annotation.y), r: "3.4", fill: "black" }));
   }
 
   defs.append(mask);
@@ -2340,32 +3300,82 @@ function highlightAnnotation(annotationId) {
   }, 1000);
 }
 
-async function loadFile(file) {
+async function loadFile(file, options = {}) {
+  const shouldStoreFile = options.store !== false;
   currentDocumentKey = getDocumentKey(file);
+  deletedPageIds = await readDeletedPageIds(currentDocumentKey);
   try {
     localStorage.setItem(lastDocumentKey, currentDocumentKey);
   } catch {}
-  storeDocumentFile(currentDocumentKey, file).catch(() => {});
+  if (shouldStoreFile) await storeDocumentFile(currentDocumentKey, file).catch(() => {});
+  upsertDocumentRecord({
+    key: currentDocumentKey,
+    kind: "file",
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    lastModified: file.lastModified,
+    updatedAt: Date.now(),
+  });
   docTitle.textContent = file.name;
   fileName.textContent = file.name;
+  statusFileName.textContent = file.name;
   fileMeta.textContent = `${formatBytes(file.size)} \u00b7 \u672c\u5730\u9884\u89c8`;
   await restoreAnnotationsForCurrentDocument();
   resetPages();
 
   if (file.type.startsWith("image/")) {
     await renderImage(file);
+    await appendStoredExtraPages(currentDocumentKey);
+    updateCurrentDocumentPageMeta();
+    updateCurrentDocumentThumbnail();
+    if (!hasDocumentPages()) renderEmptyDocumentState();
+    activateMobileAnnotationTool();
+    renderDocumentList();
     return;
   }
 
-  if (file.type === "application/pdf") await renderPdf(file);
+  if (file.type === "application/pdf") {
+    await renderPdf(file);
+    await appendStoredExtraPages(currentDocumentKey);
+    updateCurrentDocumentPageMeta();
+    updateCurrentDocumentThumbnail();
+    if (!hasDocumentPages()) renderEmptyDocumentState();
+    activateMobileAnnotationTool();
+    renderDocumentList();
+  }
 }
 
 function resetPages() {
+  hideStartupPanel();
   pageStack.replaceChildren();
   renderAnnotations();
 }
 
+function updateCurrentDocumentThumbnail() {
+  if (!currentDocumentKey) return;
+  const thumbnail = createFirstPageThumbnail();
+  updateDocumentRecord(currentDocumentKey, { thumbnail });
+}
+
+function createFirstPageThumbnail() {
+  const source = pageStack.querySelector(".doc-page canvas");
+  if (!source?.width || !source?.height) return "";
+
+  const output = document.createElement("canvas");
+  const target = 320;
+  const ratio = source.width / source.height;
+  output.width = ratio >= 1 ? target : Math.max(1, Math.round(target * ratio));
+  output.height = ratio >= 1 ? Math.max(1, Math.round(target / ratio)) : target;
+  const context = output.getContext("2d");
+  context.fillStyle = "#f6f7f9";
+  context.fillRect(0, 0, output.width, output.height);
+  context.drawImage(source, 0, 0, output.width, output.height);
+  return output.toDataURL("image/jpeg", 0.68);
+}
+
 function createPage(pageId, width, height) {
+  hideStartupPanel();
   const page = document.createElement("div");
   page.className = "doc-page";
   page.dataset.pageId = String(pageId);
@@ -2378,7 +3388,21 @@ function createPage(pageId, width, height) {
   annotationLayer.className = "annotation-layer";
   const badge = document.createElement("span");
   badge.className = "page-badge";
-  badge.textContent = `Page ${pageId}`;
+  const badgeText = document.createElement("span");
+  badgeText.textContent = `Page ${pageId}`;
+  const deleteButton = document.createElement("button");
+  deleteButton.className = "page-delete";
+  deleteButton.type = "button";
+  deleteButton.title = t("confirmDelete");
+  deleteButton.setAttribute("aria-label", `${t("confirmDelete")} Page ${pageId}`);
+  deleteButton.append(createIconPlaceholder("x"));
+  deleteButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+  deleteButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    confirmDeletePage(pageId);
+  });
+  badge.append(badgeText, deleteButton);
 
   page.append(canvas, overlay, annotationLayer, badge);
   pageStack.append(page);
@@ -2389,17 +3413,149 @@ function renderImage(file) {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => {
-      const { canvas } = createPage(1, image.naturalWidth, image.naturalHeight);
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
-      canvas.getContext("2d").drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+      if (!isPageDeleted(1)) drawImageAsPage(image, 1);
       fileMeta.textContent = `${formatBytes(file.size)} \u00b7 image \u00b7 \u672c\u5730\u9884\u89c8`;
       renderAnnotations();
-      centerCanvas();
+      resetCanvasView();
       resolve();
     };
     image.src = URL.createObjectURL(file);
   });
+}
+
+function renderBlankPage(pageId = 1) {
+  if (isPageDeleted(pageId)) return;
+
+  const width = 1200;
+  const height = 1600;
+  const { canvas } = createPage(pageId, width, height);
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#f8fafc";
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = "#e5e7eb";
+  context.lineWidth = 1;
+  for (let x = 0; x <= width; x += 48) {
+    context.beginPath();
+    context.moveTo(x, 0);
+    context.lineTo(x, height);
+    context.stroke();
+  }
+  for (let y = 0; y <= height; y += 48) {
+    context.beginPath();
+    context.moveTo(0, y);
+    context.lineTo(width, y);
+    context.stroke();
+  }
+}
+
+function drawImageAsPage(image, pageId) {
+  if (isPageDeleted(pageId)) return null;
+  const { canvas } = createPage(pageId, image.naturalWidth, image.naturalHeight);
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  canvas.getContext("2d").drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
+  return canvas;
+}
+
+function hasDocumentPages() {
+  return pageStack.querySelector(".doc-page") != null;
+}
+
+function getNextPageId() {
+  const ids = [...pageStack.querySelectorAll(".doc-page")]
+    .map((page) => Number(page.dataset.pageId))
+    .filter(Number.isFinite);
+  return ids.length ? Math.max(...ids) + 1 : 1;
+}
+
+function updateCurrentDocumentPageMeta(extraText = "") {
+  const pageCount = pageStack.querySelectorAll(".doc-page").length;
+  if (!pageCount) {
+    fileMeta.textContent = `0 pages \u00b7 \u672c\u5730\u9884\u89c8`;
+    if (currentDocumentKey) updateDocumentRecord(currentDocumentKey, { pageCount: 0 });
+    return;
+  }
+  const suffix = extraText ? ` \u00b7 ${extraText}` : "";
+  fileMeta.textContent = `${pageCount} pages${suffix} \u00b7 \u672c\u5730\u9884\u89c8`;
+  if (currentDocumentKey) {
+    updateDocumentRecord(currentDocumentKey, { pageCount });
+  }
+}
+
+function confirmDeletePage(pageId) {
+  showConfirmDialog({
+    title: t("confirmDeletePageTitle"),
+    body: t("confirmDeletePageBody", { page: String(pageId) }),
+    confirmLabel: t("confirmDelete"),
+    onConfirm: () => deletePageById(pageId),
+  });
+}
+
+async function deletePageById(pageId) {
+  const pageKey = String(pageId);
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${CSS.escape(pageKey)}"]`);
+  if (!page) return;
+
+  annotations = annotations.filter((annotation) => String(annotation.pageId) !== pageKey);
+  if (editingAnnotationId && !annotations.some((annotation) => annotation.id === editingAnnotationId)) {
+    editingAnnotationId = null;
+  }
+  page.remove();
+  saveAnnotations();
+  await persistDeletedPage(pageKey);
+  renderAnnotations();
+  updateCurrentDocumentPageMeta();
+  updateCurrentDocumentThumbnail();
+  updateSurfaceBounds();
+  if (!hasDocumentPages()) renderEmptyDocumentState();
+}
+
+async function addClipboardImageToBoard(file) {
+  if (!hasDocumentPages()) {
+    if (currentDocumentKey && documentCatalog.some((item) => item.key === currentDocumentKey && item.kind === "blank")) {
+      hideStartupPanel();
+      await appendImagePage(file, { persist: true });
+      return;
+    }
+
+    await loadFile(file);
+    return;
+  }
+
+  await appendImagePage(file, { persist: true });
+}
+
+function appendImagePage(file, options = {}) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = async () => {
+      const pageId = options.pageId || getNextPageId();
+      const canvas = drawImageAsPage(image, pageId);
+      if (options.persist && canvas) await persistExtraImagePage(file, pageId);
+      updateCurrentDocumentPageMeta(options.persist ? "\u5df2\u8ffd\u52a0\u56fe\u7247" : "");
+      updateCurrentDocumentThumbnail();
+      renderAnnotations();
+      updateSurfaceBounds();
+      if (options.focus !== false && canvas) focusPageInViewport(canvas.closest(".doc-page"));
+      activateMobileAnnotationTool();
+      renderDocumentList();
+      resolve();
+    };
+    image.src = URL.createObjectURL(file);
+  });
+}
+
+function focusPageInViewport(page) {
+  if (!page) return;
+
+  const viewport = canvasViewport.getBoundingClientRect();
+  const pageCenterX = pageStack.offsetLeft + page.offsetLeft + page.offsetWidth / 2;
+  const pageCenterY = pageStack.offsetTop + page.offsetTop + page.offsetHeight / 2;
+  pan.x = viewport.width / 2 - pageCenterX * zoom;
+  pan.y = viewport.height / 2 - pageCenterY * zoom;
+  applyCanvasTransform();
 }
 
 async function renderPdf(file) {
@@ -2407,6 +3563,7 @@ async function renderPdf(file) {
   const pdf = await pdfjs.getDocument({ data: buffer }).promise;
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    if (isPageDeleted(pageNumber)) continue;
     const pdfPage = await pdf.getPage(pageNumber);
     const viewport = pdfPage.getViewport({ scale: 1.6 });
     const { canvas } = createPage(pageNumber, viewport.width, viewport.height);
@@ -2417,7 +3574,7 @@ async function renderPdf(file) {
 
   fileMeta.textContent = `${pdf.numPages} pages \u00b7 \u672c\u5730\u9884\u89c8`;
   renderAnnotations();
-  centerCanvas();
+  resetCanvasView();
 }
 
 function formatBytes(bytes) {
@@ -2432,11 +3589,355 @@ function clamp(value, min, max) {
 async function initializeDocument() {
   if (await loadFixtureFromQuery()) return;
 
-  const restored = await restoreLastDocumentFile();
-  if (!restored) {
-    await restoreAnnotationsForCurrentDocument();
-    renderAnnotations();
+  renderDocumentList();
+  const lastKey = localStorage.getItem(lastDocumentKey);
+  if (lastKey && documentCatalog.some((item) => item.key === lastKey)) {
+    const restored = await loadDocumentByKey(lastKey, { resetView: true }).catch(() => false);
+    if (restored) return;
   }
+
+  if (documentCatalog.length) {
+    const restored = await loadDocumentByKey(documentCatalog[0].key, { force: true }).catch(() => false);
+    if (restored) return;
+  }
+
+  await createNewBlankDocument();
+}
+
+function loadDocumentCatalog() {
+  try {
+    const catalog = JSON.parse(localStorage.getItem(documentCatalogStorageKey) || "[]");
+    return Array.isArray(catalog) ? catalog.filter((item) => item?.key && item?.name) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDocumentCatalog() {
+  try {
+    localStorage.setItem(documentCatalogStorageKey, JSON.stringify(documentCatalog));
+  } catch {}
+}
+
+function upsertDocumentRecord(record) {
+  const nextRecord = {
+    ...record,
+    updatedAt: record.updatedAt || Date.now(),
+  };
+  const existingIndex = documentCatalog.findIndex((item) => item.key === nextRecord.key);
+  if (existingIndex >= 0) {
+    documentCatalog[existingIndex] = { ...documentCatalog[existingIndex], ...nextRecord };
+  } else {
+    documentCatalog.unshift(nextRecord);
+  }
+  documentCatalog.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  saveDocumentCatalog();
+  renderDocumentList();
+}
+
+function updateDocumentRecord(key, updates) {
+  const index = documentCatalog.findIndex((item) => item.key === key);
+  if (index < 0) return;
+  documentCatalog[index] = { ...documentCatalog[index], ...updates, updatedAt: Date.now() };
+  documentCatalog.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  saveDocumentCatalog();
+  renderDocumentList();
+}
+
+function renderDocumentList() {
+  if (!documentList) return;
+
+  if (!documentCatalog.length) {
+    if (!documentList.querySelector(".file-empty")) {
+      documentList.innerHTML = "";
+      const empty = document.createElement("div");
+      empty.className = "file-empty";
+      empty.append(fileName, fileMeta);
+      documentList.append(empty);
+    }
+    fileName.textContent = currentDocumentKey ? docTitle.textContent : "\u672a\u9009\u62e9\u6587\u4ef6";
+    fileMeta.textContent = currentDocumentKey ? fileMeta.textContent : "PDF, PNG, JPG";
+    return;
+  }
+
+  documentList.innerHTML = "";
+  documentCatalog.forEach((record) => {
+    const button = document.createElement("div");
+    button.className = "file-card";
+    button.setAttribute("role", "button");
+    button.setAttribute("tabindex", "0");
+    button.dataset.documentKey = record.key;
+    button.classList.toggle("active", record.key === currentDocumentKey);
+    button.addEventListener("click", () => loadDocumentByKey(record.key));
+    button.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showDocumentContextMenu(event.clientX, event.clientY, record.key);
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      loadDocumentByKey(record.key);
+    });
+
+    const type = createDocumentThumbnail(record);
+
+    const body = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = record.name;
+    const meta = document.createElement("span");
+    meta.textContent = getDocumentMetaText(record);
+    body.append(title, meta);
+
+    const deleteButton = document.createElement("span");
+    deleteButton.className = "file-delete";
+    deleteButton.setAttribute("role", "button");
+    deleteButton.setAttribute("tabindex", "0");
+    deleteButton.title = t("deleteAnnotation");
+    deleteButton.setAttribute("aria-label", `${t("deleteAnnotation")} ${record.name}`);
+    deleteButton.append(createIconPlaceholder("trash-2"));
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      confirmDeleteDocument(record.key);
+    });
+    deleteButton.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      confirmDeleteDocument(record.key);
+    });
+
+    button.append(type, body, deleteButton);
+    documentList.append(button);
+  });
+}
+
+function getDocumentTypeLabel(record) {
+  if (record.kind === "blank") return "NEW";
+  if (record.type === "application/pdf") return "PDF";
+  if (record.type?.startsWith("image/")) return "IMG";
+  return "DOC";
+}
+
+function createDocumentThumbnail(record) {
+  const thumb = document.createElement("span");
+  thumb.className = `file-type ${record.type?.startsWith("image/") ? "image" : ""}`;
+  if (record.thumbnail) {
+    thumb.classList.add("has-thumbnail");
+    const image = document.createElement("img");
+    image.src = record.thumbnail;
+    image.alt = record.name;
+    thumb.addEventListener("pointerenter", (event) => queueCommentImagePreview(record.thumbnail, event.currentTarget));
+    thumb.addEventListener("pointermove", (event) => positionCommentImagePreview(event.currentTarget));
+    thumb.addEventListener("pointerleave", hideCommentImagePreview);
+    thumb.addEventListener("focus", (event) => queueCommentImagePreview(record.thumbnail, event.currentTarget));
+    thumb.addEventListener("blur", hideCommentImagePreview);
+    thumb.append(image);
+    return thumb;
+  }
+
+  thumb.textContent = getDocumentTypeLabel(record);
+  return thumb;
+}
+
+function getDocumentMetaText(record) {
+  if (record.kind === "blank") {
+    const count = Number(record.pageCount || 0);
+    return `${count} page${count > 1 ? "s" : ""} \u00b7 ${t("blankMeta")}`;
+  }
+  const size = Number(record.size || 0);
+  const pages = Number(record.pageCount || 0);
+  const pageText = pages ? `${pages} page${pages > 1 ? "s" : ""} \u00b7 ` : "";
+  return `${pageText}${size ? formatBytes(size) : "\u672c\u5730\u9884\u89c8"}`;
+}
+
+function renameDocumentByKey(key) {
+  const record = documentCatalog.find((item) => item.key === key);
+  if (!record) return;
+
+  showRenameDialog({
+    title: t("renameDocumentPrompt"),
+    value: record.name,
+    confirmLabel: t("renameDocument"),
+    onConfirm: (nextName) => {
+      if (!nextName || nextName === record.name) return;
+      updateDocumentRecord(key, { name: nextName });
+      if (key === currentDocumentKey) {
+        docTitle.textContent = nextName;
+        fileName.textContent = nextName;
+        statusFileName.textContent = nextName;
+      }
+    },
+  });
+}
+
+function confirmDeleteDocument(key) {
+  const record = documentCatalog.find((item) => item.key === key);
+  if (!record) return;
+
+  showConfirmDialog({
+    title: t("confirmDeleteDocumentTitle"),
+    body: t("confirmDeleteDocumentBody", { name: record.name }),
+    confirmLabel: t("confirmDelete"),
+    onConfirm: () => deleteDocumentByKey(key),
+  });
+}
+
+async function deleteDocumentByKey(key) {
+  const wasCurrent = key === currentDocumentKey;
+  documentCatalog = documentCatalog.filter((item) => item.key !== key);
+  saveDocumentCatalog();
+  removeStoredDocument(key).catch(() => {});
+  removeAnnotationSnapshot(key).catch(() => {});
+  try {
+    localStorage.removeItem(`${storagePrefix}${key}`);
+    if (localStorage.getItem(lastDocumentKey) === key) localStorage.removeItem(lastDocumentKey);
+  } catch {}
+
+  if (!wasCurrent) {
+    renderDocumentList();
+    return;
+  }
+
+  const nextDocument = documentCatalog[0];
+  if (nextDocument) {
+    currentDocumentKey = null;
+    await loadDocumentByKey(nextDocument.key, { force: true });
+    return;
+  }
+
+  showStartupPage();
+}
+
+function showStartupPage() {
+  currentDocumentKey = null;
+  deletedPageIds = new Set();
+  annotations = [];
+  docTitle.textContent = t("appTitle");
+  fileName.textContent = "\u672a\u9009\u62e9\u6587\u4ef6";
+  fileMeta.textContent = "PDF, PNG, JPG";
+  statusFileName.textContent = "\u672a\u9009\u62e9\u6587\u4ef6";
+  try {
+    localStorage.removeItem(lastDocumentKey);
+  } catch {}
+  resetPages();
+  renderStartupPanel();
+  renderAnnotations();
+  resetCanvasView();
+  renderDocumentList();
+}
+
+function renderStartupPanel() {
+  emptyState.classList.add("open");
+}
+
+function hideStartupPanel() {
+  emptyState.classList.remove("open");
+}
+
+function renderEmptyDocumentState() {
+  renderStartupPanel();
+  renderAnnotations();
+  resetCanvasView();
+}
+
+function isCurrentBlankDocumentEmpty() {
+  if (!currentDocumentKey) return false;
+  const record = documentCatalog.find((item) => item.key === currentDocumentKey);
+  if (record?.kind !== "blank") return false;
+  if (annotations.some(isPersistableAnnotation)) return false;
+  if (deletedPageIds.size > 0) return false;
+  const pages = pageStack.querySelectorAll(".doc-page");
+  return pages.length === 0;
+}
+
+async function createNewBlankDocument() {
+  if (creatingBlankDocument) return;
+
+  if (isCurrentBlankDocumentEmpty()) {
+    resetCanvasView();
+    return;
+  }
+
+  creatingBlankDocument = true;
+  newDocumentBtn.disabled = true;
+  saveAnnotations();
+  try {
+    const timestamp = Date.now();
+    const key = `board:${timestamp}`;
+    const name = `${t("blankDocument")} ${new Date(timestamp).toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+
+    currentDocumentKey = key;
+    deletedPageIds = new Set();
+    annotations = [];
+    try {
+      localStorage.setItem(lastDocumentKey, currentDocumentKey);
+    } catch {}
+    await storeBlankDocumentRecord({ key, name });
+    upsertDocumentRecord({ key, kind: "blank", name, pageCount: 0, updatedAt: timestamp });
+    docTitle.textContent = name;
+    fileName.textContent = name;
+    statusFileName.textContent = name;
+    fileMeta.textContent = `0 pages \u00b7 ${t("blankMeta")}`;
+    resetPages();
+    renderStartupPanel();
+    renderAnnotations();
+    updateCurrentDocumentThumbnail();
+    resetCanvasView();
+    activateMobileAnnotationTool();
+  } finally {
+    creatingBlankDocument = false;
+    newDocumentBtn.disabled = false;
+  }
+}
+
+async function loadDocumentByKey(key, options = {}) {
+  if (!key) return false;
+  if (key === currentDocumentKey && !options.force) return true;
+
+  saveAnnotations();
+  const record = documentCatalog.find((item) => item.key === key);
+  if (!record) return false;
+
+  if (record.kind === "blank") {
+    currentDocumentKey = key;
+    deletedPageIds = await readDeletedPageIds(currentDocumentKey);
+    try {
+      localStorage.setItem(lastDocumentKey, currentDocumentKey);
+    } catch {}
+    docTitle.textContent = record.name;
+    fileName.textContent = record.name;
+    statusFileName.textContent = record.name;
+    const storedPageCount = Number(record.pageCount || 0);
+    fileMeta.textContent = `${storedPageCount} page${storedPageCount === 1 ? "" : "s"} \u00b7 ${t("blankMeta")}`;
+    await restoreAnnotationsForCurrentDocument();
+    resetPages();
+    await appendStoredExtraPages(currentDocumentKey);
+    updateCurrentDocumentPageMeta(t("blankMeta"));
+    updateCurrentDocumentThumbnail();
+    if (!hasDocumentPages()) renderEmptyDocumentState();
+    renderAnnotations();
+    resetCanvasView();
+    activateMobileAnnotationTool();
+    updateDocumentRecord(key, { updatedAt: Date.now() });
+    return true;
+  }
+
+  const stored = await readDocumentFile(key).catch(() => null);
+  const file = createRestoredDocumentFile(stored);
+  if (!file) return false;
+  await loadFile(file, { store: false });
+  updateDocumentRecord(key, { name: record.name });
+  docTitle.textContent = record.name;
+  fileName.textContent = record.name;
+  statusFileName.textContent = record.name;
+  return true;
 }
 
 function getDocumentKey(file) {
@@ -2484,6 +3985,8 @@ function normalizeAnnotation(annotation) {
 }
 
 function saveAnnotations() {
+  if (!currentDocumentKey) return;
+
   const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
   try {
     localStorage.setItem(lastDocumentKey, currentDocumentKey);
@@ -2513,9 +4016,10 @@ async function restoreLastDocumentFile() {
   if (!documentKey || documentKey === defaultDocumentKey) return false;
 
   const record = await readDocumentFile(documentKey).catch(() => null);
-  if (!record?.file) return false;
+  const file = createRestoredDocumentFile(record);
+  if (!file) return false;
 
-  await loadFile(record.file);
+  await loadFile(file);
   return true;
 }
 
@@ -2548,22 +4052,153 @@ async function withFileStore(mode, callback) {
   });
 }
 
-function storeDocumentFile(key, file) {
+async function storeDocumentFile(key, file) {
+  const buffer = await file.arrayBuffer();
+  return withFileStore("readwrite", (store) => {
+    const existingRequest = store.get(key);
+    existingRequest.onsuccess = () => {
+      const existing = existingRequest.result || {};
+      store.put({
+        ...existing,
+        key,
+        kind: "file",
+        buffer,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        lastModified: file.lastModified,
+        savedAt: Date.now(),
+      });
+    };
+    return existingRequest;
+  });
+}
+
+async function storeBlankDocumentRecord(record) {
   return withFileStore("readwrite", (store) =>
     store.put({
-      key,
-      file,
-      name: file.name,
-      type: file.type,
-      size: file.size,
-      lastModified: file.lastModified,
+      key: record.key,
+      kind: "blank",
+      name: record.name,
+      type: "application/x-pointking-board",
+      size: 0,
+      pageCount: 0,
+      extraPages: [],
       savedAt: Date.now(),
     }),
   );
 }
 
+async function persistExtraImagePage(file, pageId) {
+  if (!currentDocumentKey) return;
+
+  const buffer = await file.arrayBuffer();
+  await withFileStore("readwrite", (store) => {
+    const request = store.get(currentDocumentKey);
+    request.onsuccess = () => {
+      const existing = request.result || {
+        key: currentDocumentKey,
+        kind: "blank",
+        name: docTitle.textContent || t("blankDocument"),
+        type: "application/x-pointking-board",
+        size: 0,
+        extraPages: [],
+      };
+      const extraPages = Array.isArray(existing.extraPages) ? existing.extraPages : [];
+      extraPages.push({
+        pageId,
+        buffer,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        lastModified: file.lastModified,
+        savedAt: Date.now(),
+      });
+      store.put({
+        ...existing,
+        extraPages,
+        pageCount: pageStack.querySelectorAll(".doc-page").length,
+        savedAt: Date.now(),
+      });
+    };
+    return request;
+  });
+
+  updateDocumentRecord(currentDocumentKey, {
+    pageCount: pageStack.querySelectorAll(".doc-page").length,
+  });
+}
+
+async function appendStoredExtraPages(documentKey) {
+  const record = await readDocumentFile(documentKey).catch(() => null);
+  const extraPages = Array.isArray(record?.extraPages) ? record.extraPages : [];
+  for (const page of extraPages) {
+    if (!page?.buffer) continue;
+    const file = new File([page.buffer], page.name || "pasted-image.png", {
+      type: page.type || "image/png",
+      lastModified: page.lastModified || page.savedAt || Date.now(),
+    });
+    await appendImagePage(file, { persist: false, pageId: page.pageId, focus: false });
+  }
+}
+
+function isPageDeleted(pageId) {
+  return deletedPageIds.has(String(pageId));
+}
+
+async function readDeletedPageIds(documentKey) {
+  const record = await readDocumentFile(documentKey).catch(() => null);
+  return new Set((Array.isArray(record?.deletedPageIds) ? record.deletedPageIds : []).map(String));
+}
+
+async function persistDeletedPage(pageId) {
+  if (!currentDocumentKey) return;
+
+  deletedPageIds.add(String(pageId));
+  await withFileStore("readwrite", (store) => {
+    const request = store.get(currentDocumentKey);
+    request.onsuccess = () => {
+      const existing = request.result || {
+        key: currentDocumentKey,
+        kind: "blank",
+        name: docTitle.textContent || t("blankDocument"),
+        type: "application/x-pointking-board",
+        size: 0,
+      };
+      store.put({
+        ...existing,
+        deletedPageIds: [...deletedPageIds],
+        pageCount: pageStack.querySelectorAll(".doc-page").length,
+        savedAt: Date.now(),
+      });
+    };
+    return request;
+  });
+}
+
 function readDocumentFile(key) {
   return withFileStore("readonly", (store) => store.get(key));
+}
+
+function removeStoredDocument(key) {
+  return withFileStore("readwrite", (store) => store.delete(key));
+}
+
+function createRestoredDocumentFile(record) {
+  if (!record) return null;
+
+  if (record.buffer) {
+    return new File([record.buffer], record.name || "document", {
+      type: record.type || "application/octet-stream",
+      lastModified: record.lastModified || record.savedAt || Date.now(),
+    });
+  }
+
+  if (record.file) {
+    return record.file;
+  }
+
+  return null;
 }
 
 function getAnnotationRecordKey(documentKey) {
@@ -2583,6 +4218,10 @@ function storeAnnotationSnapshot(documentKey, snapshot) {
 
 function readAnnotationSnapshot(documentKey) {
   return withFileStore("readonly", (store) => store.get(getAnnotationRecordKey(documentKey)));
+}
+
+function removeAnnotationSnapshot(documentKey) {
+  return withFileStore("readwrite", (store) => store.delete(getAnnotationRecordKey(documentKey)));
 }
 
 

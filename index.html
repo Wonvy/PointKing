@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>&#25351;&#28857;&#29579;</title>
-    <link rel="stylesheet" href="./styles.css?v=20260703-mobile-annotation-focus" />
+    <title>PointKing</title>
+    <link rel="stylesheet" href="./styles.css?v=20260704-title-no-subtitle" />
   </head>
   <body>
     <div class="app">
@@ -12,8 +12,8 @@
         <div class="brand">
           <span class="mark">P</span>
           <div>
-            <strong id="brandName">&#25351;&#28857;&#29579;</strong>
-            <span id="brandSub">&#25209;&#27880;&#24037;&#20316;&#21488;</span>
+            <strong id="brandName">PointKing</strong>
+            <span id="brandSub"></span>
           </div>
         </div>
 
@@ -28,18 +28,10 @@
 
         <section class="panel">
           <div class="panel-title" id="panelTitle">&#25991;&#20214;</div>
-          <div class="file-card active">
-            <span class="file-type">PDF</span>
-            <div>
-              <strong id="fileName">homepage-review.pdf</strong>
-              <span id="fileMeta">3 pages &middot; 12 comments</span>
-            </div>
-          </div>
-          <div class="file-card">
-            <span class="file-type image">JPG</span>
-            <div>
-              <strong>mobile-flow.jpg</strong>
-              <span>2 comments</span>
+          <div class="file-list" id="documentList">
+            <div class="file-empty">
+              <span id="fileName">&#26410;&#36873;&#25321;&#25991;&#20214;</span>
+              <small id="fileMeta">PDF, PNG, JPG</small>
             </div>
           </div>
         </section>
@@ -56,8 +48,8 @@
           <div class="document-title">
             <span class="status-dot"></span>
             <div>
-              <strong id="docTitle">homepage-review.pdf</strong>
-              <span id="docSubtitle">&#22312;&#32447;&#25209;&#27880; &middot; &#22810;&#39029;&#30011;&#24067;</span>
+              <strong id="docTitle">&#25351;&#28857;&#29579;</strong>
+              <span id="docSubtitle"></span>
             </div>
           </div>
 
@@ -74,16 +66,21 @@
           </div>
 
           <div class="actions">
-            <button class="ghost" id="languageBtn" title="English" aria-label="Switch language">
-              <span id="languageText">EN</span>
+            <button class="ghost" id="undoBtn" title="&#25764;&#38144;" aria-label="&#25764;&#38144;">
+              <i data-lucide="undo-2"></i>
             </button>
             <button class="ghost" id="themeBtn" title="&#20999;&#25442;&#20027;&#39064;" aria-label="&#20999;&#25442;&#20027;&#39064;">
               <i data-lucide="sun"></i>
             </button>
-            <span class="zoom-readout" id="zoomReadout">100%</span>
-            <button class="ghost" id="undoBtn" title="&#25764;&#38144;" aria-label="&#25764;&#38144;">
-              <i data-lucide="undo-2"></i>
+            <button class="ghost" id="languageBtn" title="English" aria-label="Switch language">
+              <span id="languageText">EN</span>
             </button>
+            <span class="zoom-readout" id="zoomReadout">100%</span>
+            <button class="mobile-file-btn" id="mobileFileBtn" type="button">
+              <i data-lucide="file-up"></i>
+              <span id="mobileFileText">&#36873;&#25321;&#25991;&#20214;</span>
+            </button>
+            <button class="new-document-btn" id="newDocumentBtn" type="button">&#26032;&#24314;</button>
             <button class="primary" id="shareBtn">
               <i data-lucide="download"></i>
               <span id="shareText">&#23548;&#20986;</span>
@@ -92,19 +89,43 @@
         </header>
 
         <section class="canvas-viewport" id="canvasViewport">
-          <div class="canvas-surface" id="canvasSurface">
-            <div class="page-stack" id="pageStack">
-              <div class="doc-page placeholder-page" data-page-id="intro">
-                <div class="placeholder" id="placeholder">
-                  <span id="placeholderProduct">&#25351;&#28857;&#29579;</span>
-                  <h1 id="placeholderTitle">&#22810;&#39029; PDF &#19968;&#27425;&#23637;&#24320;</h1>
-                  <p id="placeholderCopy">&#23548;&#20837; PDF &#21518;&#65292;&#39029;&#38754;&#20250;&#22312;&#26080;&#38480;&#30011;&#24067;&#19978;&#32437;&#21521;&#25490;&#24067;&#12290;&#25353;&#20303; Ctrl &#24182;&#28378;&#21160;&#40736;&#26631;&#21487;&#20197;&#32553;&#25918;&#30011;&#24067;&#12290;</p>
-                </div>
-                <svg class="overlay" aria-label="Annotations"></svg>
+          <div class="empty-state" id="emptyState">
+            <div class="placeholder" id="placeholder">
+              <h1 id="placeholderTitle">&#28155;&#21152;&#25991;&#20214;</h1>
+              <p id="placeholderCopy">&#23548;&#20837;&#25991;&#20214;&#25110;&#31896;&#36148;&#22270;&#29255;&#24320;&#22987;&#25209;&#27880;&#12290;</p>
+              <div class="placeholder-actions">
+                <button class="placeholder-action primary-action" id="placeholderFileBtn" type="button">
+                  <span>&#28155;&#21152;&#25991;&#20214;</span>
+                </button>
+                <button class="placeholder-action" id="placeholderPasteBtn" type="button">
+                  <span>&#31896;&#36148;&#22270;&#29255;</span>
+                </button>
               </div>
             </div>
           </div>
+          <div class="canvas-surface" id="canvasSurface">
+            <div class="page-stack" id="pageStack"></div>
+          </div>
         </section>
+
+        <footer class="statusbar" id="statusbar" aria-label="Workspace status">
+          <span class="statusbar-item">
+            <span class="statusbar-label">&#25991;&#20214;</span>
+            <strong id="statusFileName">&#26410;&#36873;&#25321;&#25991;&#20214;</strong>
+          </span>
+          <button class="statusbar-icon-toggle" id="detailToggleBtn" type="button" title="&#26174;&#31034;&#35814;&#32454;&#25209;&#27880;" aria-label="&#26174;&#31034;&#35814;&#32454;&#25209;&#27880;" aria-pressed="false">
+            <i data-lucide="info"></i>
+          </button>
+          <span class="statusbar-item">
+            <span class="statusbar-label">&#25209;&#27880;</span>
+            <strong id="statusCommentCount">0</strong>
+          </span>
+          <span class="statusbar-item">
+            <span class="statusbar-label">&#32553;&#25918;</span>
+            <input class="status-zoom-slider" id="statusZoomSlider" type="range" min="35" max="260" value="100" aria-label="&#30011;&#24067;&#32553;&#25918;" />
+            <strong id="statusZoom">100%</strong>
+          </span>
+        </footer>
       </main>
 
       <div class="resize-handle resize-handle-right" id="rightResizeHandle" role="separator" aria-orientation="vertical" aria-label="&#35843;&#25972;&#21491;&#26639;&#23485;&#24230;">
@@ -134,9 +155,13 @@
 
         <div class="comment-list" id="commentList"></div>
       </aside>
+
+      <div class="mobile-zoom-control" id="mobileZoomControl" aria-label="&#30011;&#24067;&#32553;&#25918;">
+        <input id="mobileZoomSlider" type="range" min="35" max="260" value="100" aria-label="&#30011;&#24067;&#32553;&#25918;" />
+      </div>
     </div>
 
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-    <script src="./script.js?v=20260703-static-html-export" type="module"></script>
+    <script src="./vendor/lucide/lucide.min.js?v=20260704-title-no-subtitle"></script>
+    <script src="./script.js?v=20260704-title-no-subtitle" type="module"></script>
   </body>
 </html>
