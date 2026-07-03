@@ -1701,12 +1701,14 @@ function renderAnnotations() {
   commentList.replaceChildren();
   let renderedCommentCount = 0;
   const groupedComments = new Map();
+  const annotationOrder = getAnnotationOrderMap();
 
   annotations.forEach((annotation) => {
     const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
     if (!page) return;
 
     const layer = getAnnotationLayer(page);
+    annotation.renderIndex = annotationOrder.get(annotation.id) || "";
     if (annotation.type === "mark") drawMark(layer, annotation);
     if (annotation.type === "text") drawTextNote(layer, annotation);
     if (!annotation.draft && matchesCommentFilters(annotation)) {
@@ -1720,6 +1722,20 @@ function renderAnnotations() {
   commentCount.textContent = `(${renderedCommentCount})`;
   statusCommentCount.textContent = String(renderedCommentCount);
   renderLucideIcons();
+}
+
+function getAnnotationOrderMap() {
+  return new Map(
+    annotations
+      .filter(isPersistableAnnotation)
+      .slice()
+      .sort((first, second) => {
+        const pageDelta = Number(first.pageId) - Number(second.pageId);
+        if (pageDelta) return pageDelta;
+        return getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second);
+      })
+      .map((annotation, index) => [annotation.id, index + 1]),
+  );
 }
 
 function renderCommentFilterTabs() {
@@ -1821,6 +1837,7 @@ function drawMark(layer, annotation) {
   if (!shouldShowAnnotationEditor(annotation)) {
     box.append(createAnnotationTooltip(annotation));
   }
+  box.append(createAnnotationIndexBadge(annotation));
   layer.append(box);
   if (shouldShowAnnotationEditor(annotation)) {
     appendAnnotationEditor(layer, createAnnotationEditor("mark-input", "mark-editor", annotation));
@@ -1991,6 +2008,7 @@ function drawTextNote(layer, annotation) {
 
   const dot = document.createElement("span");
   dot.className = "text-dot";
+  dot.append(createAnnotationIndexBadge(annotation));
   note.style.setProperty("--annotation-color", getAnnotationColor(annotation));
   bindAnnotationEdit(note, annotation);
   bindAnnotationHover(note, annotation);
@@ -2005,6 +2023,13 @@ function drawTextNote(layer, annotation) {
   }
   drawAnnotationDetailCallout(layer, annotation);
   renderLucideIcons();
+}
+
+function createAnnotationIndexBadge(annotation) {
+  const badge = document.createElement("span");
+  badge.className = "annotation-index-badge";
+  badge.textContent = annotation.renderIndex ? String(annotation.renderIndex) : "";
+  return badge;
 }
 
 function drawAnnotationDetailCallout(layer, annotation) {
@@ -3033,15 +3058,24 @@ function addComment(annotation, container = commentList) {
   article.tabIndex = 0;
   article.style.setProperty("--annotation-color", getAnnotationColor(annotation));
 
-  const avatar = document.createElement("span");
-  avatar.className = "avatar";
-  avatar.textContent = "PK";
+  if (annotation.renderIndex) {
+    const indexBadge = document.createElement("span");
+    indexBadge.className = "comment-index-badge";
+    indexBadge.textContent = String(annotation.renderIndex);
+    article.append(indexBadge);
+  }
 
   const body = document.createElement("div");
   body.className = "comment-body";
 
   const title = document.createElement("strong");
-  title.textContent = `${getAnnotationIntentLabel(annotation)} \u00b7 ${t("page", { page: annotation.pageId })}`;
+  title.className = "comment-title";
+  const titleIntent = document.createElement("span");
+  titleIntent.textContent = getAnnotationIntentLabel(annotation);
+  const titlePage = document.createElement("span");
+  titlePage.className = "comment-title-page";
+  titlePage.textContent = t("page", { page: annotation.pageId });
+  title.append(titleIntent, titlePage);
 
   const text = document.createElement("p");
   text.textContent = annotation.text || getAnnotationFallbackText(annotation);
@@ -3056,7 +3090,7 @@ function addComment(annotation, container = commentList) {
   }
   if (hasReferenceImages(annotation)) body.append(createCommentReferences(annotation));
   body.append(time);
-  article.append(avatar, body);
+  article.append(body);
   container.append(article);
 }
 
