@@ -112,6 +112,7 @@ const translations = {
     expandRight: "\u5c55\u5f00\u53f3\u680f",
     detailCallouts: "\u663e\u793a\u8be6\u7ec6\u6279\u6ce8",
     pasteClipboard: "\u7c98\u8d34\u526a\u8d34\u677f",
+    pasteReading: "\u6b63\u5728\u8bfb\u53d6\u526a\u8d34\u677f\u2026\u2026\u5982\u679c\u6ca1\u6709\u53cd\u5e94\uff0c\u8bf7\u76f4\u63a5\u6309 Ctrl+V \u7c98\u8d34\u56fe\u7247\u3002",
     pasteImageHint: "\u6d4f\u89c8\u5668\u4e0d\u5141\u8bb8\u6309\u94ae\u8bfb\u53d6\u526a\u8d34\u677f\u56fe\u7247\uff0c\u8bf7\u6309 Ctrl+V \u7c98\u8d34\u3002",
     pasteNoImage: "\u526a\u8d34\u677f\u91cc\u6ca1\u6709\u53ef\u7c98\u8d34\u7684\u56fe\u7247",
     pastedImage: "\u5df2\u7c98\u8d34\u56fe\u7247",
@@ -174,6 +175,7 @@ const translations = {
     expandRight: "Expand right panel",
     detailCallouts: "Show annotation details",
     pasteClipboard: "Paste clipboard",
+    pasteReading: "Reading the clipboard... If nothing happens, press Ctrl+V to paste an image.",
     pasteImageHint: "This browser cannot read clipboard images from the button. Press Ctrl+V to paste.",
     pasteNoImage: "No image found in the clipboard",
     pastedImage: "Image pasted",
@@ -228,6 +230,9 @@ let pinchState = null;
 let editingAnnotationId = null;
 let regionPreviewFrame = null;
 let annotationNoticeTimer = null;
+let placeholderPasteFeedbackTimer = null;
+let lastPointAnnotationTriggerAt = 0;
+let lastCanvasPointClick = null;
 let magnifierEnabled = false;
 let magnifierTimer = null;
 let magnifierActive = false;
@@ -371,16 +376,20 @@ mobileFileBtn.addEventListener("click", () => {
 newDocumentBtn.addEventListener("click", createNewBlankDocument);
 placeholderFileBtn.addEventListener("click", () => fileInput.click());
 placeholderPasteBtn.addEventListener("click", async () => {
+  showPlaceholderPasteFeedback(t("pasteReading"), 3600);
   const result = await loadImageFromClipboard();
   if (result === "pasted") {
     showAnnotationNotice(t("pastedImage"));
+    showPlaceholderPasteFeedback(t("pastedImage"), 1600);
     return;
   }
   if (result === "empty") {
     showAnnotationNotice(t("pasteNoImage"));
+    showPlaceholderPasteFeedback(t("pasteNoImage"), 2600);
     return;
   }
   showAnnotationNotice(t("pasteImageHint"), 2600);
+  showPlaceholderPasteFeedback(t("pasteImageHint"), 3600);
 });
 
 mobileZoomSlider.addEventListener("input", () => {
@@ -537,6 +546,17 @@ canvasViewport.addEventListener("pointermove", (event) => {
   applyCanvasTransform();
 });
 
+canvasViewport.addEventListener(
+  "pointerup",
+  (event) => {
+    if (maybeCreatePointAnnotationFromPointerUp(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  },
+  { capture: true },
+);
+
 canvasViewport.addEventListener("pointerup", (event) => {
   if (canvasViewport.hasPointerCapture?.(event.pointerId)) {
     canvasViewport.releasePointerCapture(event.pointerId);
@@ -610,17 +630,25 @@ canvasViewport.addEventListener("pointercancel", (event) => {
 });
 
 canvasViewport.addEventListener("dblclick", (event) => {
-  const page = event.target.closest(".doc-page");
-  if (!isMobileLayout() && currentTool === "mark" && page && !event.target.closest(".annotation-editor, .annotation-ui")) {
+  const page = getCanvasEventPage(event);
+  if (!isMobileLayout() && page && !event.target.closest(".annotation-editor, .annotation-ui")) {
     event.preventDefault();
     event.stopPropagation();
-    createTextAnnotationAtEvent(event, page);
+    createPointAnnotationFromDoubleClickEvent(event, page);
     return;
   }
 
   if (!isMobileLayout() || event.target.closest(".doc-page, .annotation-editor")) return;
   event.preventDefault();
   resetCanvasView();
+});
+
+canvasViewport.addEventListener("click", (event) => {
+  const page = getCanvasEventPage(event);
+  if (isMobileLayout() || event.detail < 2 || !page || event.target.closest(".annotation-editor, .annotation-ui")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  createPointAnnotationFromDoubleClickEvent(event, page);
 });
 
 undoBtn.addEventListener("click", () => {
@@ -718,6 +746,7 @@ function applyLanguage() {
   shareText.textContent = t("share");
   commentsTitle.textContent = t("comments");
   placeholderTitle.textContent = t("placeholderTitle");
+  placeholderCopy.classList.remove("feedback");
   placeholderCopy.textContent = t("placeholderCopy");
   commentSearch.placeholder = t("searchAnnotations");
   commentSearch.setAttribute("aria-label", t("searchAnnotations"));
@@ -1121,6 +1150,17 @@ function showAnnotationNotice(message, duration = 1800) {
   window.clearTimeout(annotationNoticeTimer);
   annotationNoticeTimer = window.setTimeout(() => {
     annotationNotice.classList.remove("open");
+  }, duration);
+}
+
+function showPlaceholderPasteFeedback(message, duration = 3000) {
+  placeholderCopy.textContent = message;
+  placeholderCopy.classList.add("feedback");
+
+  window.clearTimeout(placeholderPasteFeedbackTimer);
+  placeholderPasteFeedbackTimer = window.setTimeout(() => {
+    placeholderCopy.classList.remove("feedback");
+    placeholderCopy.textContent = t("placeholderCopy");
   }, duration);
 }
 
@@ -1580,6 +1620,59 @@ function addAnnotation(annotation) {
   annotations.push(annotation);
   renderAnnotations();
   return annotation;
+}
+
+function createPointAnnotationFromDoubleClickEvent(event, page) {
+  const now = Date.now();
+  if (now - lastPointAnnotationTriggerAt < 320) return;
+  lastPointAnnotationTriggerAt = now;
+  lastCanvasPointClick = null;
+
+  if (isPanning) endPan(event);
+  stopMagnifier();
+  dragStart = null;
+  dragEndPoint = null;
+  dragPreview = null;
+  setCurrentTool("mark");
+  createTextAnnotationAtEvent(event, page);
+}
+
+function maybeCreatePointAnnotationFromPointerUp(event) {
+  if (isMobileLayout() || event.button !== 0 || event.target.closest(".annotation-editor, .annotation-ui")) return false;
+
+  const page = getCanvasEventPage(event);
+  if (!page) {
+    lastCanvasPointClick = null;
+    return false;
+  }
+
+  const now = Date.now();
+  const previous = lastCanvasPointClick;
+  lastCanvasPointClick = {
+    time: now,
+    x: event.clientX,
+    y: event.clientY,
+    pageId: page.dataset.pageId,
+  };
+
+  if (!previous || previous.pageId !== page.dataset.pageId) return false;
+
+  const elapsed = now - previous.time;
+  const distance = Math.hypot(event.clientX - previous.x, event.clientY - previous.y);
+  if (elapsed > 460 || distance > 10) return false;
+
+  createPointAnnotationFromDoubleClickEvent(event, page);
+  return true;
+}
+
+function getCanvasEventPage(event) {
+  const directPage = event.target.closest?.(".doc-page");
+  if (directPage) return directPage;
+
+  return [...pageStack.querySelectorAll(".doc-page")].find((page) => {
+    const rect = page.getBoundingClientRect();
+    return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+  }) || null;
 }
 
 function createTextAnnotationAtEvent(event, page) {
@@ -2057,6 +2150,18 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
   ];
 
   const activeTabItem = tabItems.find(([mode]) => mode === activeEditorMode) || tabItems[0];
+  let hoverModeTimer = null;
+  const cancelHoverModeTimer = () => {
+    window.clearTimeout(hoverModeTimer);
+    hoverModeTimer = null;
+  };
+  const scheduleHoverEditorMode = (mode, placeholder, tab) => {
+    cancelHoverModeTimer();
+    hoverModeTimer = window.setTimeout(() => {
+      activateEditorMode(mode, placeholder, tab);
+      hoverModeTimer = null;
+    }, 250);
+  };
   const activateEditorMode = (mode, placeholder, tab, { focusInput = false } = {}) => {
     if (activeEditorMode === mode) return;
     activeEditorMode = mode;
@@ -2082,10 +2187,17 @@ function createAnnotationEditor(inputClassName, editorClassName, annotation) {
     if (mode === "deleteContent") tab.classList.add("danger");
     tab.addEventListener("pointerenter", (event) => {
       if (event.pointerType === "touch") return;
+      scheduleHoverEditorMode(mode, placeholder, tab);
+    });
+    tab.addEventListener("pointerleave", cancelHoverModeTimer);
+    tab.addEventListener("focus", () => {
+      cancelHoverModeTimer();
       activateEditorMode(mode, placeholder, tab);
     });
-    tab.addEventListener("focus", () => activateEditorMode(mode, placeholder, tab));
-    tab.addEventListener("click", () => activateEditorMode(mode, placeholder, tab, { focusInput: true }));
+    tab.addEventListener("click", () => {
+      cancelHoverModeTimer();
+      activateEditorMode(mode, placeholder, tab, { focusInput: true });
+    });
     tabs.append(tab);
   });
   tabs.append(closeButton);
@@ -3472,6 +3584,12 @@ function getNextPageId() {
 
 function updateCurrentDocumentPageMeta(extraText = "") {
   const pageCount = pageStack.querySelectorAll(".doc-page").length;
+  const currentRecord = documentCatalog.find((item) => item.key === currentDocumentKey);
+  if (currentRecord?.kind === "blank") {
+    fileMeta.textContent = getBlankDocumentMetaText(currentRecord, pageCount, extraText);
+    updateDocumentRecord(currentDocumentKey, { pageCount });
+    return;
+  }
   if (!pageCount) {
     fileMeta.textContent = `0 pages \u00b7 \u672c\u5730\u9884\u89c8`;
     if (currentDocumentKey) updateDocumentRecord(currentDocumentKey, { pageCount: 0 });
@@ -3743,13 +3861,41 @@ function createDocumentThumbnail(record) {
 
 function getDocumentMetaText(record) {
   if (record.kind === "blank") {
-    const count = Number(record.pageCount || 0);
-    return `${count} page${count > 1 ? "s" : ""} \u00b7 ${t("blankMeta")}`;
+    return getBlankDocumentMetaText(record);
   }
   const size = Number(record.size || 0);
   const pages = Number(record.pageCount || 0);
   const pageText = pages ? `${pages} page${pages > 1 ? "s" : ""} \u00b7 ` : "";
   return `${pageText}${size ? formatBytes(size) : "\u672c\u5730\u9884\u89c8"}`;
+}
+
+function getBlankDocumentMetaText(record = {}, pageCount = record.pageCount, extraText = "") {
+  const count = Number(pageCount || 0);
+  const createdText = formatDocumentCreatedAt(getDocumentCreatedAt(record));
+  const parts = [
+    createdText,
+    `${count} page${count === 1 ? "" : "s"}`,
+    extraText || t("blankMeta"),
+  ].filter(Boolean);
+  return parts.join(" \u00b7 ");
+}
+
+function getDocumentCreatedAt(record = {}) {
+  const explicitTime = Number(record.createdAt || 0);
+  if (explicitTime) return explicitTime;
+  const [, keyTime] = String(record.key || "").split(":");
+  const parsedTime = Number(keyTime || 0);
+  return Number.isFinite(parsedTime) ? parsedTime : 0;
+}
+
+function formatDocumentCreatedAt(timestamp) {
+  if (!timestamp) return "";
+  return new Date(timestamp).toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function renameDocumentByKey(key) {
@@ -3866,12 +4012,7 @@ async function createNewBlankDocument() {
   try {
     const timestamp = Date.now();
     const key = `board:${timestamp}`;
-    const name = `${t("blankDocument")} ${new Date(timestamp).toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en-US", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    })}`;
+    const name = t("blankDocument");
 
     currentDocumentKey = key;
     deletedPageIds = new Set();
@@ -3879,12 +4020,12 @@ async function createNewBlankDocument() {
     try {
       localStorage.setItem(lastDocumentKey, currentDocumentKey);
     } catch {}
-    await storeBlankDocumentRecord({ key, name });
-    upsertDocumentRecord({ key, kind: "blank", name, pageCount: 0, updatedAt: timestamp });
+    await storeBlankDocumentRecord({ key, name, createdAt: timestamp });
+    upsertDocumentRecord({ key, kind: "blank", name, pageCount: 0, createdAt: timestamp, updatedAt: timestamp });
     docTitle.textContent = name;
     fileName.textContent = name;
     statusFileName.textContent = name;
-    fileMeta.textContent = `0 pages \u00b7 ${t("blankMeta")}`;
+    fileMeta.textContent = getBlankDocumentMetaText({ key, createdAt: timestamp }, 0);
     resetPages();
     renderStartupPanel();
     renderAnnotations();
@@ -3915,7 +4056,7 @@ async function loadDocumentByKey(key, options = {}) {
     fileName.textContent = record.name;
     statusFileName.textContent = record.name;
     const storedPageCount = Number(record.pageCount || 0);
-    fileMeta.textContent = `${storedPageCount} page${storedPageCount === 1 ? "" : "s"} \u00b7 ${t("blankMeta")}`;
+    fileMeta.textContent = getBlankDocumentMetaText(record, storedPageCount);
     await restoreAnnotationsForCurrentDocument();
     resetPages();
     await appendStoredExtraPages(currentDocumentKey);
@@ -4080,6 +4221,7 @@ async function storeBlankDocumentRecord(record) {
       key: record.key,
       kind: "blank",
       name: record.name,
+      createdAt: record.createdAt || Date.now(),
       type: "application/x-pointking-board",
       size: 0,
       pageCount: 0,

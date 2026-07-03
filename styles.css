@@ -51,7 +51,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF UI Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
   font-size: 14px;
 }
 
@@ -238,11 +238,16 @@ svg {
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #f4f4f5;
-  color: #08090c;
-  font-weight: 800;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.mark img {
+  display: block;
+  width: 30px;
+  height: auto;
 }
 
 .brand strong,
@@ -485,7 +490,8 @@ svg {
 }
 
 .file-type.has-thumbnail {
-  border: 1px solid var(--line-strong);
+  border: 0;
+  border-radius: 0;
   background: #f6f7f9;
   color: transparent;
 }
@@ -495,6 +501,7 @@ svg {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 0;
 }
 
 .workspace {
@@ -1140,32 +1147,38 @@ html[data-theme="light"] .placeholder {
 .empty-state .placeholder {
   position: relative;
   inset: auto;
-  width: min(360px, 100%);
+  width: min(390px, 100%);
   height: auto;
   align-content: center;
   justify-items: center;
-  gap: 12px;
-  padding: 18px;
+  gap: 14px;
+  padding: 22px 24px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 78%, transparent);
   color: var(--text);
   text-align: center;
   backdrop-filter: blur(14px);
+  animation: emptyPanelIn 260ms ease-out both;
 }
 
 .empty-state .placeholder h1 {
   max-width: 320px;
   color: var(--text);
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.25;
-  font-weight: 800;
+  font-weight: 750;
 }
 
 .empty-state .placeholder p {
   max-width: 300px;
   color: var(--soft);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
+  transition: color 160ms ease;
+}
+
+.empty-state .placeholder p.feedback {
+  color: color-mix(in srgb, var(--accent) 78%, white);
 }
 
 .placeholder span {
@@ -1198,7 +1211,7 @@ html[data-theme="light"] .placeholder {
 .placeholder-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
 }
 
 .placeholder-action {
@@ -1218,13 +1231,22 @@ html[data-theme="light"] .placeholder {
 }
 
 .empty-state .placeholder-action {
-  height: 42px;
-  min-width: 112px;
+  height: 46px;
+  min-width: 124px;
   border-color: var(--line);
   background: color-mix(in srgb, var(--panel) 82%, transparent);
   color: var(--soft);
   box-shadow: none;
-  padding: 0 18px;
+  padding: 0 22px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 .empty-state .placeholder-action span {
@@ -1234,6 +1256,8 @@ html[data-theme="light"] .placeholder {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .empty-state .placeholder-action.primary-action {
@@ -1241,26 +1265,61 @@ html[data-theme="light"] .placeholder {
   border-color: transparent;
   background: var(--accent);
   color: #ffffff;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .empty-state .placeholder-action.primary-action span {
   color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .empty-state .placeholder-action:hover {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
   background: color-mix(in srgb, var(--accent) 14%, var(--panel));
   color: var(--text);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+
+.empty-state .placeholder-action:active {
+  transform: translateY(0) scale(0.98);
   box-shadow: none;
-  transform: none;
+}
+
+.empty-state .placeholder-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, white);
+  outline-offset: 3px;
 }
 
 .empty-state .placeholder-action.primary-action:hover {
   background: color-mix(in srgb, var(--accent) 88%, white);
   color: #ffffff;
   border: 0;
-  box-shadow: none;
-  transform: none;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--accent) 26%, transparent);
+  transform: translateY(-1px);
+}
+
+@keyframes emptyPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-state .placeholder {
+    animation: none;
+  }
+
+  .empty-state .placeholder-action {
+    transition: none;
+  }
 }
 
 .placeholder-action.primary-action {
@@ -2336,7 +2395,6 @@ html[data-theme="light"] .placeholder {
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--line);
-  border-left: 2px solid var(--annotation-color, var(--line));
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
   transition:
@@ -2351,7 +2409,7 @@ html[data-theme="light"] .placeholder {
 
 .comment[data-annotation-id]:hover,
 .comment.active {
-  border-color: color-mix(in srgb, var(--annotation-color, var(--accent)) 58%, var(--line));
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
   background: color-mix(in srgb, var(--annotation-color, var(--accent)) 14%, transparent);
   transform: translateY(-1px);
 }
