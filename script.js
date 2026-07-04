@@ -1,4 +1,4 @@
-﻿import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
+import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
 
 const app = document.querySelector(".app");
 const canvasViewport = document.querySelector("#canvasViewport");
@@ -81,6 +81,9 @@ const translations = {
     exportImageHint: "\u70b9\u51fb\u9884\u89c8\u6216\u6309\u94ae\u4e0b\u8f7d\u5230\u672c\u5730\u3002",
     exportImageEmpty: "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u9875\u9762",
     downloadImage: "\u4e0b\u8f7d\u56fe\u7247",
+    copySvg: "\u590d\u5236 SVG",
+    copiedSvg: "\u5df2\u590d\u5236 SVG",
+    copySvgFailed: "\u590d\u5236 SVG \u5931\u8d25",
     closePreview: "\u5173\u95ed\u9884\u89c8",
     copied: "\u5bfc\u51fa\u529f\u80fd\u5f85\u6dfb\u52a0",
     ready: "\u5df2\u5c31\u7eea",
@@ -132,6 +135,8 @@ const translations = {
     pasteImageHint: "\u6d4f\u89c8\u5668\u4e0d\u5141\u8bb8\u6309\u94ae\u8bfb\u53d6\u526a\u8d34\u677f\u56fe\u7247\uff0c\u8bf7\u6309 Ctrl+V \u7c98\u8d34\u3002",
     pasteNoImage: "\u526a\u8d34\u677f\u91cc\u6ca1\u6709\u53ef\u7c98\u8d34\u7684\u56fe\u7247",
     pastedImage: "\u5df2\u7c98\u8d34\u56fe\u7247",
+    droppedFile: "\u5df2\u6dfb\u52a0\u6587\u4ef6",
+    unsupportedDropFile: "\u8bf7\u62d6\u5165 PDF \u6216\u56fe\u7247",
     submitShortcut: "\u63d0\u4ea4\u65b9\u5f0f",
     enterSubmit: "Enter \u63d0\u4ea4",
     ctrlEnterSubmit: "Ctrl+Enter \u63d0\u4ea4",
@@ -156,6 +161,9 @@ const translations = {
     exportImageHint: "Click a preview or button to download it locally.",
     exportImageEmpty: "No page available to export",
     downloadImage: "Download image",
+    copySvg: "Copy SVG",
+    copiedSvg: "SVG copied",
+    copySvgFailed: "Copy SVG failed",
     closePreview: "Close preview",
     copied: "Export coming soon",
     ready: "Ready",
@@ -207,6 +215,8 @@ const translations = {
     pasteImageHint: "This browser cannot read clipboard images from the button. Press Ctrl+V to paste.",
     pasteNoImage: "No image found in the clipboard",
     pastedImage: "Image pasted",
+    droppedFile: "File added",
+    unsupportedDropFile: "Drop a PDF or image",
     submitShortcut: "Submit shortcut",
     enterSubmit: "Enter to submit",
     ctrlEnterSubmit: "Ctrl+Enter to submit",
@@ -372,9 +382,19 @@ document.addEventListener("keyup", (event) => {
   canvasViewport.classList.remove("space-panning");
 });
 
-fileInput.addEventListener("change", (event) => {
+fileInput.accept = "application/pdf,image/png,image/jpeg,image/webp";
+
+fileInput.addEventListener("change", async (event) => {
   const [file] = event.target.files;
-  if (file) loadFile(file);
+  event.target.value = "";
+  if (!file) return;
+
+  try {
+    await loadFile(file);
+  } catch (error) {
+    console.error(error);
+    showAnnotationNotice(t("unsupportedDropFile"), 2200);
+  }
 });
 
 dropzone.addEventListener("pointerenter", (event) => {
@@ -387,6 +407,14 @@ dropzone.addEventListener("pointermove", () => {
 });
 
 dropzone.addEventListener("pointerleave", hideCommentImagePreview);
+dropzone.addEventListener("click", openFilePicker);
+
+canvasViewport.addEventListener("dragenter", handleCanvasFileDrag);
+canvasViewport.addEventListener("dragover", handleCanvasFileDrag);
+canvasViewport.addEventListener("dragleave", (event) => {
+  if (!canvasViewport.contains(event.relatedTarget)) canvasViewport.classList.remove("file-dragging");
+});
+canvasViewport.addEventListener("drop", handleCanvasFileDrop);
 
 document.addEventListener("paste", (event) => {
   if (isEditableTarget(event.target) || event.target.closest?.(".annotation-editor")) return;
@@ -399,12 +427,12 @@ document.addEventListener("paste", (event) => {
 });
 
 mobileFileBtn.addEventListener("click", () => {
-  fileInput.click();
+  openFilePicker();
   if (isMobileLayout()) setPanelCollapsed("left", true, { persist: true });
 });
 
 newDocumentBtn.addEventListener("click", createNewBlankDocument);
-placeholderFileBtn.addEventListener("click", () => fileInput.click());
+placeholderFileBtn.addEventListener("click", openFilePicker);
 placeholderPasteBtn.addEventListener("click", async () => {
   showPlaceholderPasteFeedback(t("pasteReading"), 3600);
   const result = await loadImageFromClipboard();
@@ -460,6 +488,8 @@ canvasViewport.addEventListener(
 );
 
 canvasViewport.addEventListener("pointerdown", (event) => {
+  if (isInteractiveCanvasControl(event.target)) return;
+
   const isMiddleButton = event.button === 1;
   if (event.target.closest(".annotation-ui") && !isMiddleButton) return;
   if (isMobileLayout()) event.preventDefault();
@@ -1719,6 +1749,10 @@ function isMobileLayout() {
 
 function isEditableTarget(target) {
   return Boolean(target?.closest?.("input, textarea, [contenteditable='true']"));
+}
+
+function isInteractiveCanvasControl(target) {
+  return Boolean(target?.closest?.("button, input, textarea, select, label, [contenteditable='true']"));
 }
 
 function syncMobilePanelState() {
@@ -3599,6 +3633,51 @@ function hideCommentImagePreview() {
   commentImagePreview.classList.remove("open");
 }
 
+function openFilePicker() {
+  fileInput.value = "";
+  fileInput.accept = "application/pdf,image/png,image/jpeg,image/webp";
+
+  try {
+    if (typeof fileInput.showPicker === "function") {
+      fileInput.showPicker();
+      return;
+    }
+  } catch {}
+
+  fileInput.click();
+}
+
+function handleCanvasFileDrag(event) {
+  if (!hasSupportedDragFile(event.dataTransfer)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  canvasViewport.classList.add("file-dragging");
+}
+
+async function handleCanvasFileDrop(event) {
+  if (!hasSupportedDragFile(event.dataTransfer)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  canvasViewport.classList.remove("file-dragging");
+
+  const file = getSupportedDropFile(event.dataTransfer.files);
+  if (!file) {
+    showAnnotationNotice(t("unsupportedDropFile"), 2200);
+    return;
+  }
+
+  await addDroppedFileToBoard(file);
+  showAnnotationNotice(t("droppedFile"));
+}
+
+function hasSupportedDragFile(dataTransfer) {
+  return [...(dataTransfer?.items || [])].some((item) => item.kind === "file");
+}
+
+function getSupportedDropFile(files) {
+  return [...(files || [])].find((file) => file.type === "application/pdf" || file.type.startsWith("image/")) || null;
+}
+
 async function openExportImagePreview() {
   const pageItems = createExportImageItems();
   if (!pageItems.length) {
@@ -3671,7 +3750,7 @@ function createExportImageItems() {
         }));
       return {
         pageId,
-        title: currentLanguage === "zh" ? `第 ${pageId} 页` : `Page ${pageId}`,
+        title: currentLanguage === "zh" ? `\u7b2c ${pageId} \u9875` : `Page ${pageId}`,
         fileTitle: statusFileName.textContent || t("appTitle"),
         image: createExportPageImage(canvas, pageAnnotations),
         annotations: pageAnnotations,
@@ -3683,12 +3762,32 @@ function createExportImageItems() {
 function createExportImageCard(item) {
   const card = document.createElement("article");
   card.className = "export-image-card";
-  card.addEventListener("click", () => downloadExportImage(item));
 
   const image = document.createElement("img");
   image.src = item.exportImage || item.image;
   image.alt = item.title;
-  card.append(image);
+
+  const actions = document.createElement("div");
+  actions.className = "export-image-card-actions";
+
+  const downloadButton = document.createElement("button");
+  downloadButton.type = "button";
+  downloadButton.className = "export-image-action";
+  downloadButton.title = t("downloadImage");
+  downloadButton.setAttribute("aria-label", `${t("downloadImage")} ${item.title}`);
+  downloadButton.append(createIconPlaceholder("download"), document.createTextNode(t("downloadImage")));
+  downloadButton.addEventListener("click", () => downloadExportImage(item));
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "export-image-action";
+  copyButton.title = t("copySvg");
+  copyButton.setAttribute("aria-label", `${t("copySvg")} ${item.title}`);
+  copyButton.append(createIconPlaceholder("copy"), document.createTextNode(t("copySvg")));
+  copyButton.addEventListener("click", () => copyExportImageSvgIcon(item));
+
+  actions.append(downloadButton, copyButton);
+  card.append(image, actions);
   return card;
 }
 
@@ -3762,6 +3861,46 @@ async function downloadExportImage(item) {
   document.body.append(link);
   link.click();
   link.remove();
+}
+
+async function copyExportImageSvgIcon(item) {
+  try {
+    const dataUrl = item.exportImage || await createExportDownloadImage(item);
+    const { width, height } = await getImageDataUrlSize(dataUrl);
+    const svg = createExportImageSvg(dataUrl, width, height, item.title);
+    await writeSvgToClipboard(svg);
+    showAnnotationNotice(t("copiedSvg"));
+  } catch {
+    showAnnotationNotice(t("copySvgFailed"), 2200);
+  }
+}
+
+function createExportImageSvg(dataUrl, width, height, title) {
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+    `<title>${escapeHtml(title)}</title>`,
+    `<image href="${dataUrl}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/>`,
+    "</svg>",
+  ].join("");
+}
+
+async function writeSvgToClipboard(svg) {
+  if (navigator.clipboard?.write && window.ClipboardItem) {
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    await navigator.clipboard.write([new ClipboardItem({ "image/svg+xml": blob })]);
+    return;
+  }
+
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+  await navigator.clipboard.writeText(svg);
+}
+
+async function getImageDataUrlSize(dataUrl) {
+  const image = await loadImageElement(dataUrl);
+  return {
+    width: image.naturalWidth || 1,
+    height: image.naturalHeight || 1,
+  };
 }
 
 async function createExportDownloadImage(item) {
@@ -3995,7 +4134,7 @@ function createStaticBoardPreviewPage(page, annotationsForAllPages) {
 
   const badge = document.createElement("span");
   badge.className = "export-html-page-badge";
-  badge.textContent = currentLanguage === "zh" ? `第 ${page.id} 页` : `Page ${page.id}`;
+  badge.textContent = currentLanguage === "zh" ? `\u7b2c ${page.id} \u9875` : `Page ${page.id}`;
   const image = document.createElement("img");
   image.src = page.image;
   image.alt = badge.textContent;
@@ -4039,7 +4178,7 @@ function createStaticBoardPreviewCommentGroup(pageId, annotationsForPage) {
   const header = document.createElement("div");
   header.className = "export-html-comment-group-head";
   const label = document.createElement("span");
-  label.textContent = currentLanguage === "zh" ? `第 ${pageId} 页` : `Page ${pageId}`;
+  label.textContent = currentLanguage === "zh" ? `\u7b2c ${pageId} \u9875` : `Page ${pageId}`;
   const count = document.createElement("span");
   count.textContent = String(annotationsForPage.length);
   header.append(label, count);
@@ -4066,7 +4205,7 @@ function createStaticBoardPreviewComment(annotation) {
   const intent = document.createElement("strong");
   intent.textContent = annotation.intentLabel;
   const page = document.createElement("span");
-  page.textContent = currentLanguage === "zh" ? `第 ${annotation.pageId} 页` : `Page ${annotation.pageId}`;
+  page.textContent = currentLanguage === "zh" ? `\u7b2c ${annotation.pageId} \u9875` : `Page ${annotation.pageId}`;
   title.append(intent, page);
   const text = document.createElement("p");
   text.textContent = annotation.text || annotation.fallbackText;
@@ -4151,7 +4290,7 @@ function createStaticBoardHtml(payload) {
 <style>
 :root{color-scheme:dark;--bg:#08090c;--panel:#101116;--panel-2:#151720;--line:rgba(255,255,255,.1);--text:#f5f5f7;--muted:#8f96a3;--accent:#6e7cff;--danger:#ff6b6b}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:14px}
-.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.pages{display:grid;gap:28px;justify-items:center}.page{position:relative;width:min(920px,100%);background:white;box-shadow:0 20px 60px rgba(0,0,0,.34)}.page::after{content:"";position:absolute;inset:0;z-index:2;background:rgba(3,7,18,.5);opacity:0;pointer-events:none}body.mask-active .page::after{opacity:1}.page>img{display:block;width:100%;height:auto}.badge{position:absolute;left:0;bottom:calc(100% + 5px);padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);font-size:11px;font-weight:700}.mark,.dot,.arrow{position:absolute}.mark,.dot-wrap{z-index:3}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.mark.active,.dot-wrap.active{z-index:4;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c) 62%,transparent))}.mark.active{background:color-mix(in srgb,var(--c) 14%,transparent)}.dot{width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.arrow{inset:0;pointer-events:none;color:var(--c);overflow:visible}.arrow line{stroke:currentColor;stroke-width:var(--w);stroke-linecap:round;vector-effect:non-scaling-stroke}.tooltip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tooltip,.dot-wrap:hover .tooltip{display:block}.dot-wrap{position:absolute}.side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;border-left:1px solid var(--line);background:var(--panel);overflow:hidden}.side-head{position:sticky;top:0;z-index:5;display:grid;gap:10px;border-bottom:1px solid var(--line);background:var(--panel);padding:16px}.side-title{display:flex;align-items:center;justify-content:space-between}.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.filter{height:28px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:12px}.filter.active,.filter:hover{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--text)}.comment-scroll{min-height:0;overflow:auto;padding:16px}.side h2{margin:0;font-size:14px}.count{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group[hidden],.card[hidden]{display:none}.group-title{display:flex;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{position:relative;display:grid;gap:10px;padding:10px 10px 10px 38px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.avatar{position:absolute;left:12px;top:10px;display:grid;width:18px;height:18px;place-items:center;border-radius:999px;background:var(--c);color:#fff;font-size:10px;font-weight:800;line-height:18px}.card strong{display:block;margin-bottom:4px;font-size:12px}.card p{margin:0 0 7px;color:#c7ccd5;font-size:12px;line-height:1.45}.thumb{display:block;width:100%;max-height:96px;object-fit:cover;border:1px solid color-mix(in srgb,var(--c) 56%,var(--line));border-radius:7px;background:#fff}.refs{display:flex;gap:6px;flex-wrap:wrap}.refs img{width:56px;height:42px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
+.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.pages{display:grid;gap:28px;justify-items:center}.page{position:relative;width:min(920px,100%);background:white;box-shadow:0 20px 60px rgba(0,0,0,.34)}.page::after{content:"";position:absolute;inset:0;z-index:2;background:rgba(3,7,18,.5);opacity:0;pointer-events:none}body.mask-active .page::after{opacity:1}.page>img{display:block;width:100%;height:auto}.badge{position:absolute;left:0;bottom:calc(100% + 5px);padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);font-size:11px;font-weight:700}.mark,.dot,.arrow{position:absolute}.mark,.dot-wrap{z-index:3}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.mark.active,.dot-wrap.active{z-index:4;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c) 62%,transparent))}.mark.active{background:color-mix(in srgb,var(--c) 14%,transparent)}.dot{width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.arrow{inset:0;pointer-events:none;color:var(--c);overflow:visible}.arrow line{stroke:currentColor;stroke-width:var(--w);stroke-linecap:round;vector-effect:non-scaling-stroke}.tooltip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tooltip,.dot-wrap:hover .tooltip{display:block}.dot-wrap{position:absolute}.side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;border-left:1px solid var(--line);background:var(--panel);overflow:hidden}.side-head{position:sticky;top:0;z-index:5;display:grid;gap:10px;border-bottom:1px solid var(--line);background:var(--panel);padding:16px}.side-title{display:flex;align-items:center;justify-content:space-between}.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.filter{height:28px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:12px}.filter.active,.filter:hover{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--text)}.comment-scroll{min-height:0;overflow:auto;padding:16px}.side h2{margin:0;font-size:14px}.count{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group[hidden],.card[hidden]{display:none}.group-title{display:flex;justify-content:space-between;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{position:relative;display:grid;gap:10px;padding:10px 10px 10px 38px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.avatar{position:absolute;left:12px;top:10px;display:grid;width:18px;height:18px;place-items:center;border-radius:999px;background:var(--c);color:#fff;font-size:10px;font-weight:800;line-height:18px}.card strong{display:block;margin-bottom:4px;font-size:12px}.card p{margin:0 0 7px;color:#c7ccd5;font-size:12px;line-height:1.45}.thumb{display:block;width:100%;height:auto;max-height:180px;object-fit:contain;border:1px solid color-mix(in srgb,var(--c) 56%,var(--line));border-radius:7px;background:#fff}.refs{display:flex;gap:6px;flex-wrap:wrap}.refs img{display:block;width:min(100%,140px);height:auto;max-height:140px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
 </style>
 </head>
 <body>
@@ -4160,7 +4299,7 @@ function createStaticBoardHtml(payload) {
     <header class="top"><div><h1>${escapeHtml(payload.title)}</h1><div class="meta">${escapeHtml(payload.subtitle)}</div></div><div class="meta">${escapeHtml(payload.exportedAt)}</div></header>
     <section class="pages" id="pages"></section>
   </main>
-  <aside class="side"><div class="side-head"><div class="side-title"><h2>${currentLanguage === "zh" ? "批注" : "Annotations"}</h2><span class="count" id="count"></span></div><div class="filters"><button class="filter active" data-filter="all">${currentLanguage === "zh" ? "全部" : "All"}</button><button class="filter" data-filter="suggestion">${currentLanguage === "zh" ? "建议" : "Suggestion"}</button><button class="filter" data-filter="editText">${currentLanguage === "zh" ? "修改" : "Edit"}</button><button class="filter" data-filter="deleteContent">${currentLanguage === "zh" ? "删除" : "Delete"}</button></div></div><div class="comment-scroll" id="comments"></div></aside>
+  <aside class="side"><div class="side-head"><div class="side-title"><h2>${currentLanguage === "zh" ? "\u6279\u6ce8" : "Annotations"}</h2><span class="count" id="count"></span></div><div class="filters"><button class="filter active" data-filter="all">${currentLanguage === "zh" ? "\u5168\u90e8" : "All"}</button><button class="filter" data-filter="suggestion">${currentLanguage === "zh" ? "\u5efa\u8bae" : "Suggestion"}</button><button class="filter" data-filter="editText">${currentLanguage === "zh" ? "\u4fee\u6539" : "Edit"}</button><button class="filter" data-filter="deleteContent">${currentLanguage === "zh" ? "\u5220\u9664" : "Delete"}</button></div></div><div class="comment-scroll" id="comments"></div></aside>
 </div>
 <div class="preview" id="preview"><img alt=""></div>
 <script>
@@ -4168,10 +4307,10 @@ const data=${json};
 const pages=document.querySelector("#pages"),comments=document.querySelector("#comments"),count=document.querySelector("#count"),preview=document.querySelector("#preview"),previewImg=preview.querySelector("img");
 const byPage=new Map(data.pages.map(p=>[String(p.id),p]));
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
-function label(a){return a.intentLabel+" · "+(document.documentElement.lang.startsWith("zh")?"第 "+a.pageId+" 页":"Page "+a.pageId)}
+function label(a){return a.intentLabel+" \u00b7 "+(document.documentElement.lang.startsWith("zh")?"\u7b2c "+a.pageId+" \u9875":"Page "+a.pageId)}
 data.pages.forEach(p=>{const el=document.createElement("section");el.className="page";el.id="page-"+p.id;el.style.aspectRatio=p.width+"/"+p.height;el.innerHTML='<span class="badge">Page '+esc(p.id)+'</span><img src="'+p.image+'" alt="Page '+esc(p.id)+'">';pages.append(el)});
 data.annotations.forEach(a=>{const page=document.querySelector("#page-"+CSS.escape(String(a.pageId)));if(!page)return;const c=a.color||"#6e7cff";if(a.type==="mark"){const el=document.createElement("div");el.className="mark "+(a.intent==="deleteContent"?"delete":"");el.style.cssText="--c:"+c+";left:"+a.x+"%;top:"+a.y+"%;width:"+a.width+"%;height:"+a.height+"%";el.dataset.id=a.id;el.innerHTML='<div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(el)}else{const wrap=document.createElement("div");wrap.className="dot-wrap";wrap.style.cssText="left:"+a.x+"%;top:"+a.y+"%";wrap.dataset.id=a.id;wrap.innerHTML='<span class="dot" style="--c:'+c+'"></span><div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(wrap)}if(Number.isFinite(a.arrowX)&&Number.isFinite(a.arrowY)){const start=a.arrowAnchor==="right"?[a.x+a.width,a.y+a.height/2]:a.arrowAnchor==="bottom"?[a.x+a.width/2,a.y+a.height]:a.arrowAnchor==="left"?[a.x,a.y+a.height/2]:[a.x+a.width/2,a.y];const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.classList.add("arrow");svg.style.setProperty("--c",c);svg.style.setProperty("--w",(a.arrowWidth||.75)+"px");svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("preserveAspectRatio","none");svg.innerHTML='<defs><marker id="m-'+a.id+'" markerWidth="5" markerHeight="5" refX="4.6" refY="2.5" orient="auto" markerUnits="strokeWidth" viewBox="0 0 5 5"><path d="M0 0 L5 2.5 L0 5 Z" fill="currentColor"/></marker></defs><line x1="'+start[0]+'" y1="'+start[1]+'" x2="'+a.arrowX+'" y2="'+a.arrowY+'" marker-end="url(#m-'+a.id+')"/>';page.append(svg)}});
-const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"第 "+esc(pageId)+" 页":"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(Number(a.renderIndex||0))-(Number(b.renderIndex||0))).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">'+esc(a.renderIndex||"")+'</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
+const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"\u7b2c "+esc(pageId)+" \u9875":"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(Number(a.renderIndex||0))-(Number(b.renderIndex||0))).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">'+esc(a.renderIndex||"")+'</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
 function setActive(id,on){if(!id)return;document.body.classList.toggle("mask-active",on);document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
 document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));
 comments.addEventListener("click",e=>{const card=e.target.closest(".card");if(!card)return;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");const mark=document.querySelector('.page [data-id="'+CSS.escape(card.dataset.id)+'"]');mark?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"})});
@@ -4542,6 +4681,17 @@ async function addClipboardImageToBoard(file) {
   }
 
   await appendImagePage(file, { persist: true });
+}
+
+async function addDroppedFileToBoard(file) {
+  if (file.type.startsWith("image/")) {
+    await addClipboardImageToBoard(file);
+    return;
+  }
+
+  if (file.type === "application/pdf") {
+    await loadFile(file);
+  }
 }
 
 function appendImagePage(file, options = {}) {
@@ -5438,6 +5588,3 @@ function readAnnotationSnapshot(documentKey) {
 function removeAnnotationSnapshot(documentKey) {
   return withFileStore("readwrite", (store) => store.delete(getAnnotationRecordKey(documentKey)));
 }
-
-
-
