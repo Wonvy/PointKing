@@ -286,6 +286,7 @@ let magnifierAutoEnabledForMobile = false;
 let commentSearchQuery = "";
 let commentFilterIntent = "all";
 let commentImagePreviewTimer = null;
+let commentHoverToken = 0;
 let mobilePanelsInitialized = false;
 let mobileAnnotationDock = null;
 let mobileStableViewportHeight = 0;
@@ -766,20 +767,26 @@ commentList.addEventListener("click", (event) => {
   focusAnnotationFromComment(comment.dataset.annotationId);
 });
 
-commentList.addEventListener("mouseover", (event) => {
+commentList.addEventListener("mouseover", async (event) => {
   const comment = event.target.closest("[data-annotation-id]");
   if (!comment || comment.contains(event.relatedTarget)) return;
 
-  setAnnotationFocusMask(comment.dataset.annotationId, true);
-  ensureAnnotationVisible(comment.dataset.annotationId);
-  setLinkedCommentActive(comment.dataset.annotationId, true);
+  const annotationId = comment.dataset.annotationId;
+  const token = ++commentHoverToken;
+  await seekVideoToAnnotation(annotationId);
+  const hoveredComment = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-annotation-id]");
+  if (token !== commentHoverToken || hoveredComment?.dataset.annotationId !== annotationId) return;
+  if (!isVideoAnnotation(annotationId)) setAnnotationFocusMask(annotationId, true);
+  ensureAnnotationVisible(annotationId);
+  setLinkedCommentActive(annotationId, true);
 });
 
 commentList.addEventListener("mouseout", (event) => {
   const comment = event.target.closest("[data-annotation-id]");
   if (!comment || comment.contains(event.relatedTarget)) return;
 
-  setAnnotationFocusMask(comment.dataset.annotationId, false);
+  commentHoverToken += 1;
+  if (!isVideoAnnotation(comment.dataset.annotationId)) setAnnotationFocusMask(comment.dataset.annotationId, false);
   setLinkedCommentActive(comment.dataset.annotationId, false);
 });
 
@@ -1955,6 +1962,11 @@ function getAnnotationLocationLabel(annotation) {
   return t("page", { page: annotation.pageId });
 }
 
+function isVideoAnnotation(annotationId) {
+  const annotation = annotations.find((item) => item.id === annotationId);
+  return Number.isFinite(annotation?.videoTime);
+}
+
 function getPageClientPoint(page, point) {
   const rect = getPageCoordinateElement(page).getBoundingClientRect();
   return {
@@ -2083,6 +2095,7 @@ function renderAnnotations() {
   renderCommentGroups(groupedComments);
   commentCount.textContent = `(${renderedCommentCount})`;
   statusCommentCount.textContent = String(renderedCommentCount);
+  renderVideoTimelineMarkers();
   renderLucideIcons();
 }
 
@@ -4844,6 +4857,18 @@ function createVideoControls(video) {
   playButton.type = "button";
   playButton.addEventListener("click", toggleCurrentVideoPlayback);
 
+  const previousAnnotationButton = document.createElement("button");
+  previousAnnotationButton.className = "video-control-button video-annotation-nav video-annotation-prev";
+  previousAnnotationButton.type = "button";
+  previousAnnotationButton.append(createIconPlaceholder("chevron-left"));
+  previousAnnotationButton.addEventListener("click", () => navigateVideoAnnotation("previous"));
+
+  const nextAnnotationButton = document.createElement("button");
+  nextAnnotationButton.className = "video-control-button video-annotation-nav video-annotation-next";
+  nextAnnotationButton.type = "button";
+  nextAnnotationButton.append(createIconPlaceholder("chevron-right"));
+  nextAnnotationButton.addEventListener("click", () => navigateVideoAnnotation("next"));
+
   const muteButton = document.createElement("button");
   muteButton.className = "video-control-button video-mute-button";
   muteButton.type = "button";
@@ -4891,7 +4916,9 @@ function createVideoControls(video) {
     renderAnnotations();
     updateVideoControls();
   });
-  timelineWrap.append(timeline);
+  const markerTrack = document.createElement("div");
+  markerTrack.className = "video-marker-track";
+  timelineWrap.append(timeline, markerTrack);
 
   const waveform = document.createElement("canvas");
   waveform.className = "video-waveform";
@@ -4901,9 +4928,30 @@ function createVideoControls(video) {
 
   const top = document.createElement("div");
   top.className = "video-control-top";
-  top.append(playButton, current, duration, speedSelect, muteButton);
+  const timeGroup = document.createElement("div");
+  timeGroup.className = "video-time-group";
+  timeGroup.append(current, duration);
+  const transport = document.createElement("div");
+  transport.className = "video-transport";
+  transport.append(previousAnnotationButton, playButton, nextAnnotationButton);
+  const optionGroup = document.createElement("div");
+  optionGroup.className = "video-option-group";
+  optionGroup.append(speedSelect, muteButton);
+  top.append(timeGroup, transport, optionGroup);
   root.append(top, timelineWrap, waveform);
-  return { root, playButton, muteButton, speedSelect, timeline, current, duration, waveform };
+  return {
+    root,
+    playButton,
+    previousAnnotationButton,
+    nextAnnotationButton,
+    muteButton,
+    speedSelect,
+    timeline,
+    markerTrack,
+    current,
+    duration,
+    waveform,
+  };
 }
 
 function bindVideoFrameSync(video) {
@@ -4962,8 +5010,103 @@ function updateVideoControls() {
   controls.duration.textContent = formatVideoTime(duration);
   controls.timeline.value = duration ? String(Math.round((currentTime / duration) * 1000)) : "0";
   controls.timeline.disabled = !duration;
+  updateVideoAnnotationNavButtons();
+  renderVideoTimelineMarkers();
   drawVideoWaveformProgress();
   if (iconChanged || muteIconChanged) renderLucideIcons();
+}
+
+function updateVideoAnnotationNavButtons() {
+  if (!currentVideo?.controls || !isVideoDocumentActive()) return;
+  const previous = findVideoAnnotationByDirection("previous");
+  const next = findVideoAnnotationByDirection("next");
+  syncVideoAnnotationNavButton(currentVideo.controls.previousAnnotationButton, previous, "previous");
+  syncVideoAnnotationNavButton(currentVideo.controls.nextAnnotationButton, next, "next");
+}
+
+function syncVideoAnnotationNavButton(button, annotation, direction) {
+  if (!button) return;
+  button.disabled = !annotation;
+  const zhLabel = direction === "previous" ? "\u4e0a\u4e00\u6761\u6279\u6ce8" : "\u4e0b\u4e00\u6761\u6279\u6ce8";
+  const enLabel = direction === "previous" ? "Previous annotation" : "Next annotation";
+  const label = currentLanguage === "zh" ? zhLabel : enLabel;
+  button.title = annotation ? `${label} · ${formatVideoTime(annotation.videoTime)}` : label;
+  button.setAttribute("aria-label", button.title);
+}
+
+function navigateVideoAnnotation(direction) {
+  const annotation = findVideoAnnotationByDirection(direction);
+  if (!annotation) return;
+  focusAnnotationFromComment(annotation.id);
+}
+
+function findVideoAnnotationByDirection(direction) {
+  if (!isVideoDocumentActive()) return null;
+  const currentTime = currentVideo.video.currentTime || 0;
+  const annotationsByTime = getVideoTimelineAnnotations()
+    .slice()
+    .sort((first, second) => first.videoTime - second.videoTime || getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second));
+  const tolerance = 0.08;
+  if (direction === "previous") {
+    for (let index = annotationsByTime.length - 1; index >= 0; index -= 1) {
+      if (annotationsByTime[index].videoTime < currentTime - tolerance) return annotationsByTime[index];
+    }
+    return null;
+  }
+
+  return annotationsByTime.find((annotation) => annotation.videoTime > currentTime + tolerance) || null;
+}
+
+function renderVideoTimelineMarkers() {
+  if (!currentVideo?.controls?.markerTrack || !isVideoDocumentActive()) return;
+  const { video, controls } = currentVideo;
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  controls.markerTrack.replaceChildren();
+  if (!duration) return;
+
+  getVideoTimelineAnnotations()
+    .sort((first, second) => first.videoTime - second.videoTime || getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second))
+    .forEach((annotation) => {
+      const marker = document.createElement("button");
+      marker.className = "video-timeline-marker";
+      marker.type = "button";
+      marker.dataset.annotationId = annotation.id;
+      marker.style.left = `${clamp((annotation.videoTime / duration) * 100, 0, 100)}%`;
+      marker.style.setProperty("--annotation-color", getAnnotationColor(annotation));
+      marker.setAttribute("aria-label", getVideoTimelineMarkerLabel(annotation));
+      marker.append(createVideoMarkerTooltip(annotation));
+      marker.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        focusAnnotationFromComment(annotation.id);
+      });
+      controls.markerTrack.append(marker);
+    });
+}
+
+function getVideoTimelineAnnotations() {
+  return annotations.filter((annotation) =>
+    !annotation.draft &&
+    !annotation.preview &&
+    isPersistableAnnotation(annotation) &&
+    Number.isFinite(annotation.videoTime)
+  );
+}
+
+function getVideoTimelineMarkerLabel(annotation) {
+  return `${formatVideoTime(annotation.videoTime)} ${getAnnotationIntentLabel(annotation)} ${annotation.text || getAnnotationFallbackText(annotation)}`;
+}
+
+function createVideoMarkerTooltip(annotation) {
+  const tooltip = document.createElement("span");
+  tooltip.className = "video-marker-tooltip";
+
+  const title = document.createElement("strong");
+  title.textContent = `${formatVideoTime(annotation.videoTime)} · ${getAnnotationIntentLabel(annotation)}`;
+  const text = document.createElement("span");
+  text.textContent = annotation.text || getAnnotationFallbackText(annotation);
+  tooltip.append(title, text);
+  return tooltip;
 }
 
 async function buildVideoWaveform(file) {
