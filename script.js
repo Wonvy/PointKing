@@ -4591,12 +4591,14 @@ function wrapCanvasText(text, maxWidth, fontSize) {
 }
 
 async function exportStaticBoard() {
+  const isVideoExport = isVideoDocumentActive();
   const pages = [...pageStack.querySelectorAll(".doc-page")]
     .map((page) => {
       const canvas = page.querySelector("canvas");
       if (!canvas?.width || !canvas?.height) return null;
       return {
         id: page.dataset.pageId,
+        title: page.dataset.mediaType === "video" ? getVideoDocumentDisplayName() : "",
         width: canvas.width,
         height: canvas.height,
         image: canvas.toDataURL("image/png"),
@@ -4613,18 +4615,34 @@ async function exportStaticBoard() {
       color: getAnnotationColor(annotation),
       intentLabel: getAnnotationIntentLabel(annotation),
       fallbackText: getAnnotationFallbackText(annotation),
-      regionImage: annotation.type === "mark" ? createAnnotationRegionImage(annotation) : "",
+      regionImage: Number.isFinite(annotation.videoTime) || annotation.type === "mark" ? createAnnotationRegionImage(annotation) : "",
     }));
 
   const payload = {
+    mediaType: isVideoExport ? "video" : "document",
     title: statusFileName.textContent || t("appTitle"),
     subtitle: statusFileMeta?.textContent || "",
     exportedAt: new Date().toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en"),
     pages,
     annotations: exportedAnnotations,
   };
+  if (isVideoExport) {
+    const video = currentVideo.video;
+    payload.video = {
+      name: getVideoDocumentDisplayName(),
+      fileName: currentVideo.name || getVideoDocumentDisplayName(),
+      src: createStaticVideoSource(currentVideo.name || getVideoDocumentDisplayName()),
+      previewSrc: currentVideo.url || "",
+      width: video.videoWidth || pages[0]?.width || 1280,
+      height: video.videoHeight || pages[0]?.height || 720,
+      duration: Number.isFinite(video.duration) ? video.duration : 0,
+      currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+      poster: pages[0]?.image || "",
+      waveform: Array.isArray(currentVideo.waveform) ? currentVideo.waveform : [],
+    };
+  }
 
-  const html = createStaticBoardHtml(payload);
+  const html = payload.mediaType === "video" ? createStaticVideoBoardHtml(payload) : createStaticBoardHtml(payload);
   openStaticBoardPreview(payload, html);
 }
 
@@ -4678,6 +4696,8 @@ function closeStaticBoardPreview() {
 }
 
 function createStaticBoardPreview(payload) {
+  if (payload.mediaType === "video") return createStaticVideoBoardPreview(payload);
+
   const preview = document.createElement("div");
   preview.className = "export-html-preview";
 
@@ -4815,7 +4835,9 @@ function createStaticBoardPreviewComment(annotation) {
   const intent = document.createElement("strong");
   intent.textContent = annotation.intentLabel;
   const page = document.createElement("span");
-  page.textContent = currentLanguage === "zh" ? `\u7b2c ${annotation.pageId} \u9875` : `Page ${annotation.pageId}`;
+  page.textContent = Number.isFinite(annotation.videoTime)
+    ? formatVideoTime(annotation.videoTime)
+    : currentLanguage === "zh" ? `\u7b2c ${annotation.pageId} \u9875` : `Page ${annotation.pageId}`;
   title.append(intent, page);
   const text = document.createElement("p");
   text.textContent = annotation.text || annotation.fallbackText;
@@ -4889,6 +4911,337 @@ function downloadStaticBoardHtml(payload, html) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function createStaticVideoBoardPreview(payload) {
+  const preview = document.createElement("div");
+  preview.className = "export-html-preview export-html-video-preview";
+
+  const stage = document.createElement("div");
+  stage.className = "export-html-stage export-html-video-stage";
+  const shell = document.createElement("section");
+  shell.className = "export-html-video-shell";
+
+  const frame = document.createElement("div");
+  frame.className = "export-html-video-frame";
+  frame.style.aspectRatio = `${payload.video?.width || 16} / ${payload.video?.height || 9}`;
+  const video = document.createElement("video");
+  video.className = "export-html-video";
+  video.preload = "metadata";
+  video.playsInline = true;
+  video.poster = payload.video?.poster || "";
+  video.src = payload.video?.previewSrc || payload.video?.src || "";
+  const layer = document.createElement("div");
+  layer.className = "export-html-video-layer";
+  frame.append(video, layer);
+
+  const missing = document.createElement("div");
+  missing.className = "export-html-video-missing";
+  const missingText = document.createElement("strong");
+  missingText.textContent = currentLanguage === "zh" ? "\u672a\u627e\u5230\u5bf9\u5e94\u89c6\u9891" : "Video file is missing";
+  const missingHint = document.createElement("span");
+  missingHint.textContent = currentLanguage === "zh" ? "\u5982\u679c HTML \u540c\u76ee\u5f55\u4e0b\u6ca1\u6709\u8fd9\u4e2a MP4\uff0c\u8bf7\u624b\u52a8\u9009\u62e9\u89c6\u9891\u6587\u4ef6\u3002" : "If the MP4 is not beside this HTML file, choose the video file manually.";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "video/mp4";
+  missing.append(missingText, missingHint, fileInput);
+  frame.append(missing);
+
+  const controls = document.createElement("div");
+  controls.className = "export-html-video-controls";
+  const top = document.createElement("div");
+  top.className = "export-html-video-control-top";
+  const time = document.createElement("span");
+  time.className = "export-html-video-time";
+  const play = document.createElement("button");
+  play.type = "button";
+  play.className = "export-html-video-play";
+  play.textContent = "\u25b6";
+  const spacer = document.createElement("span");
+  spacer.className = "export-html-video-spacer";
+  top.append(time, play, spacer);
+
+  const timelineWrap = document.createElement("div");
+  timelineWrap.className = "export-html-video-timeline-wrap";
+  const timeline = document.createElement("input");
+  timeline.className = "export-html-video-timeline";
+  timeline.type = "range";
+  timeline.min = "0";
+  timeline.max = "1000";
+  timeline.step = "1";
+  timeline.value = "0";
+  const markers = document.createElement("div");
+  markers.className = "export-html-video-markers";
+  timelineWrap.append(timeline, markers);
+  const waveform = document.createElement("canvas");
+  waveform.className = "export-html-video-waveform";
+  controls.append(top, timelineWrap, waveform);
+  shell.append(frame, controls);
+  stage.append(shell);
+
+  const side = createStaticBoardPreviewSide(payload);
+  preview.append(stage, side);
+
+  const videoAnnotations = payload.annotations
+    .filter((annotation) => Number.isFinite(annotation.videoTime))
+    .slice()
+    .sort((first, second) => first.videoTime - second.videoTime || Number(first.renderIndex || 0) - Number(second.renderIndex || 0));
+
+  const format = (seconds) => formatVideoTime(Number(seconds) || 0);
+  const drawAnnotations = () => {
+    const current = Number.isFinite(video.currentTime) ? video.currentTime : payload.video?.currentTime || 0;
+    layer.replaceChildren();
+    videoAnnotations
+      .filter((annotation) => Math.abs(annotation.videoTime - current) <= 0.35)
+      .forEach((annotation) => layer.append(createStaticBoardPreviewAnnotation(annotation)));
+    syncActiveVideoExportAnnotation(preview, videoAnnotations, current);
+  };
+  const drawWaveform = () => drawStaticVideoWaveform(waveform, payload.video?.waveform || [], video, payload.video?.duration || 0);
+  const sync = () => {
+    const duration = Number.isFinite(video.duration) ? video.duration : payload.video?.duration || 0;
+    const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    time.textContent = `${format(current)} / ${format(duration)}`;
+    timeline.value = duration ? String(Math.round((current / duration) * 1000)) : "0";
+    play.textContent = video.paused ? "\u25b6" : "\u23f8";
+    drawAnnotations();
+    drawWaveform();
+  };
+
+  videoAnnotations.forEach((annotation) => {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = "export-html-video-marker";
+    marker.dataset.annotationId = annotation.id;
+    marker.style.setProperty("--annotation-color", annotation.color || getAnnotationColor(annotation));
+    marker.style.left = `${clamp((annotation.videoTime / Math.max(0.001, payload.video?.duration || 0)) * 100, 0, 100)}%`;
+    marker.title = `${format(annotation.videoTime)} \u00b7 ${annotation.intentLabel} ${annotation.text || annotation.fallbackText || ""}`;
+    marker.textContent = String(annotation.renderIndex || "");
+    marker.addEventListener("click", () => {
+      video.currentTime = annotation.videoTime;
+      video.pause();
+      sync();
+    });
+    marker.addEventListener("pointerenter", () => setStaticPreviewLinkedActive(preview, annotation.id, true));
+    marker.addEventListener("pointerleave", () => setStaticPreviewLinkedActive(preview, annotation.id, false));
+    markers.append(marker);
+  });
+
+  play.addEventListener("click", () => {
+    if (video.paused) video.play().catch(() => {});
+    else video.pause();
+    sync();
+  });
+  timeline.addEventListener("input", () => {
+    const duration = Number.isFinite(video.duration) ? video.duration : payload.video?.duration || 0;
+    video.currentTime = duration * (Number(timeline.value) / 1000);
+    video.pause();
+    sync();
+  });
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    video.src = URL.createObjectURL(file);
+    missing.classList.remove("show");
+    video.load();
+  });
+  video.addEventListener("error", () => missing.classList.add("show"));
+  video.addEventListener("loadedmetadata", () => {
+    missing.classList.remove("show");
+    sync();
+  });
+  ["timeupdate", "play", "pause", "seeked", "loadeddata"].forEach((eventName) => video.addEventListener(eventName, sync));
+  if (payload.video?.currentTime) video.currentTime = payload.video.currentTime;
+  if (!video.src) missing.classList.add("show");
+  requestAnimationFrame(sync);
+
+  bindStaticBoardPreviewLinks(preview);
+  bindStaticBoardPreviewFilters(preview);
+  return preview;
+}
+
+function createStaticBoardPreviewSide(payload) {
+  const side = document.createElement("aside");
+  side.className = "export-html-side";
+  const head = document.createElement("div");
+  head.className = "export-html-side-head";
+  const titleRow = document.createElement("div");
+  titleRow.className = "export-html-side-title";
+  const title = document.createElement("strong");
+  title.textContent = `${t("comments")} (${payload.annotations.length})`;
+  const meta = document.createElement("span");
+  meta.textContent = "PointKing";
+  titleRow.append(title, meta);
+  const filters = document.createElement("div");
+  filters.className = "export-html-side-filters";
+  [
+    ["all", t("filterAll")],
+    ["suggestion", t("suggestionTab")],
+    ["editText", t("editTextTab")],
+    ["deleteContent", t("deleteTab")],
+  ].forEach(([value, label], index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `export-html-filter${index === 0 ? " active" : ""}`;
+    button.dataset.filter = value;
+    button.textContent = label;
+    filters.append(button);
+  });
+  head.append(titleRow, filters);
+  side.append(head);
+  const list = document.createElement("div");
+  list.className = "export-html-comment-list";
+
+  const groups = new Map();
+  payload.annotations.forEach((annotation) => {
+    const key = String(annotation.pageId);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(annotation);
+  });
+  [...groups.entries()]
+    .sort(([pageA], [pageB]) => Number(pageA) - Number(pageB))
+    .forEach(([pageId, items]) => list.append(createStaticBoardPreviewCommentGroup(pageId, items)));
+
+  side.append(list);
+  return side;
+}
+
+function setStaticPreviewLinkedActive(preview, annotationId, active) {
+  if (!annotationId) return;
+  preview.classList.toggle("mask-active", active);
+  preview.querySelectorAll(`[data-annotation-id="${CSS.escape(annotationId)}"]`).forEach((item) => {
+    item.classList.toggle("active", active);
+  });
+}
+
+function syncActiveVideoExportAnnotation(preview, videoAnnotations, currentTime) {
+  const active = videoAnnotations
+    .map((annotation) => ({ annotation, distance: Math.abs(annotation.videoTime - currentTime) }))
+    .filter((item) => item.distance <= 0.35)
+    .sort((first, second) => first.distance - second.distance)[0]?.annotation;
+  preview.querySelectorAll(".export-html-comment.playback-active,.export-html-video-marker.playback-active").forEach((item) => {
+    item.classList.remove("playback-active");
+  });
+  if (!active) return;
+  preview.querySelectorAll(`[data-annotation-id="${CSS.escape(active.id)}"]`).forEach((item) => {
+    item.classList.add("playback-active");
+  });
+}
+
+function drawStaticVideoWaveform(canvas, peaks, video, fallbackDuration) {
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(320, Math.round((rect.width || 720) * dpr));
+  const height = Math.max(38, Math.round((rect.height || 54) * dpr));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#151720";
+  context.fillRect(0, 0, width, height);
+  const samples = peaks?.length ? peaks : Array.from({ length: 96 }, (_, index) => 0.08 + Math.sin(index * 0.65) * 0.025);
+  const inset = Math.round(9 * dpr);
+  const drawableWidth = Math.max(1, width - inset * 2);
+  const center = height / 2;
+  const waveHeight = Math.max(2, center - Math.round(7 * dpr));
+  const duration = Number.isFinite(video?.duration) ? video.duration : fallbackDuration || 0;
+  const progress = duration ? clamp((video.currentTime || 0) / duration, 0, 1) : 0;
+  context.fillStyle = "rgba(255,255,255,.12)";
+  context.fillRect(inset, Math.round(center), drawableWidth, Math.max(1, dpr));
+  drawPremiereWaveformShape(context, samples, {
+    x: inset,
+    y: center,
+    width: drawableWidth,
+    height: waveHeight,
+    volumeScale: 1,
+    color: "rgba(136,142,155,.42)",
+    alpha: 1,
+  });
+  context.save();
+  context.beginPath();
+  context.rect(inset, 0, drawableWidth * progress, height);
+  context.clip();
+  drawPremiereWaveformShape(context, samples, {
+    x: inset,
+    y: center,
+    width: drawableWidth,
+    height: waveHeight,
+    volumeScale: 1,
+    color: "#00c2a8",
+    alpha: 0.95,
+  });
+  context.restore();
+  const x = Math.round(inset + drawableWidth * progress);
+  context.fillStyle = "rgba(255,255,255,.88)";
+  context.fillRect(Math.max(0, x - 1), 0, 2, height);
+}
+
+function createStaticVideoBoardHtml(payload) {
+  const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+  const chooseText = currentLanguage === "zh" ? "\u9009\u62e9\u89c6\u9891\u6587\u4ef6" : "Choose video file";
+  const missingTitle = currentLanguage === "zh" ? "\u672a\u627e\u5230\u5bf9\u5e94\u89c6\u9891" : "Video file is missing";
+  const missingHint = currentLanguage === "zh"
+    ? "\u8bf7\u5c06 MP4 \u653e\u5728 HTML \u540c\u4e00\u6587\u4ef6\u5939\uff0c\u6216\u624b\u52a8\u9009\u62e9\u89c6\u9891\u6587\u4ef6\u3002"
+    : "Put the MP4 beside this HTML file, or choose the video file manually.";
+  return `<!doctype html>
+<html lang="${currentLanguage === "zh" ? "zh-CN" : "en"}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(payload.title)} - PointKing</title>
+<style>
+:root{color-scheme:dark;--bg:#08090c;--panel:#101116;--panel-2:#151720;--line:rgba(255,255,255,.1);--text:#f5f5f7;--muted:#8f96a3;--accent:#00c2a8;--blue:#6e7cff;--danger:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:14px}.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:8;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.video-shell{display:grid;gap:10px;width:min(980px,100%);margin:0 auto}.video-name{display:inline-flex;justify-self:start;max-width:100%;height:22px;align-items:center;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);padding:0 8px;font-size:11px;font-weight:750}.video-frame{position:relative;overflow:hidden;background:#000}.video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.layer{position:absolute;inset:0;pointer-events:none}.mark,.dot-wrap{position:absolute;z-index:3;--c:var(--accent);pointer-events:auto}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.mark.active,.dot-wrap.active,.mark.playback-active,.dot-wrap.playback-active{z-index:4;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c) 62%,transparent))}.dot{display:block;width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.avatar{position:absolute;left:0;top:0;display:grid;width:20px;height:20px;place-items:center;border:2px solid #fff;border-radius:999px;background:var(--c);color:#fff;font-size:11px;font-weight:800;transform:translate(-50%,-50%)}.tip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tip,.dot-wrap:hover .tip{display:block}.missing{position:absolute;inset:0;z-index:6;display:none;place-items:center;background:rgba(0,0,0,.74);padding:24px;text-align:center}.missing.show{display:grid}.missing-card{display:grid;gap:10px;max-width:420px;border:1px solid var(--line);border-radius:10px;background:rgba(16,17,22,.96);padding:18px}.missing-card strong{font-size:15px}.missing-card span{color:var(--muted);font-size:12px;line-height:1.55}.missing-card label{display:inline-flex;justify-content:center;align-items:center;height:34px;border-radius:7px;background:var(--blue);color:#fff;font-size:12px;font-weight:700;cursor:pointer}.missing-card input{display:none}.controls{display:grid;gap:10px;border:1px solid var(--line);border-radius:8px;background:rgba(18,20,29,.9);padding:10px}.control-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}.time{color:#d8dce6;font-size:12px}.play{display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.04);color:var(--text);font-size:14px;cursor:pointer}.play:hover{border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.08)}.timeline-wrap{position:relative;height:18px}.timeline{position:absolute;inset:0;width:100%;height:18px;margin:0;accent-color:#d6dae3;background:transparent}.timeline::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:#8a8f99}.timeline::-webkit-slider-thumb{width:14px;height:14px;margin-top:-5px;border:2px solid #fff;border-radius:99px;background:#d6dae3}.markers{position:absolute;inset:0;pointer-events:none}.marker{position:absolute;top:50%;display:grid;width:14px;height:14px;place-items:center;border:2px solid rgba(255,255,255,.72);border-radius:999px;background:var(--c);color:#fff;font-size:0;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer}.marker:hover,.marker.active,.marker.playback-active{box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 24%,transparent);border-color:#fff}.wave{display:block;width:100%;height:54px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2)}.side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;border-left:1px solid var(--line);background:var(--panel);overflow:hidden}.side-head{position:sticky;top:0;z-index:5;display:grid;gap:10px;border-bottom:1px solid var(--line);background:var(--panel);padding:16px}.side-title,.group-title,.card-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.filter{height:28px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:12px}.filter.active,.filter:hover{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--text)}.comment-scroll{min-height:0;overflow:auto;padding:16px}.side h2{margin:0;font-size:14px}.count,.card-title span{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group[hidden],.card[hidden]{display:none}.group-title{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{position:relative;display:grid;grid-template-columns:minmax(0,1fr)86px;gap:10px;padding:10px 10px 10px 38px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active,.card.playback-active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.card .num{position:absolute;left:12px;top:12px;display:grid;width:18px;height:18px;place-items:center;border-radius:999px;background:var(--c);color:#fff;font-size:10px;font-weight:800}.card strong{font-size:12px}.card p{grid-column:1;margin:4px 0 0;color:#f5f5f7;font-size:13px;font-weight:650;line-height:1.45}.thumb{grid-column:2;grid-row:1 / span 2;width:86px;height:52px;object-fit:cover;border:1px solid var(--line);border-radius:4px;background:#000}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <main class="stage">
+    <header class="top"><div><h1>${escapeHtml(payload.title)}</h1><div class="meta">${escapeHtml(payload.subtitle)}</div></div><div class="meta">${escapeHtml(payload.exportedAt)}</div></header>
+    <section class="video-shell"><span class="video-name">${escapeHtml(payload.video?.name || payload.title)}</span><div class="video-frame" id="videoFrame"><video class="video" id="video" preload="metadata" playsinline poster="${payload.video?.poster || ""}"></video><div class="layer" id="layer"></div><div class="missing" id="missing"><div class="missing-card"><strong>${missingTitle}</strong><span>${missingHint}</span><label>${chooseText}<input id="fileInput" type="file" accept="video/mp4"></label></div></div></div><div class="controls"><div class="control-top"><span class="time" id="time"></span><button class="play" id="play" type="button">▶</button><span></span></div><div class="timeline-wrap"><input class="timeline" id="timeline" type="range" min="0" max="1000" step="1" value="0"><div class="markers" id="markers"></div></div><canvas class="wave" id="wave"></canvas></div></section>
+  </main>
+  <aside class="side"><div class="side-head"><div class="side-title"><h2>${currentLanguage === "zh" ? "\u6279\u6ce8" : "Annotations"}</h2><span class="count" id="count"></span></div><div class="filters"><button class="filter active" data-filter="all">${currentLanguage === "zh" ? "\u5168\u90e8" : "All"}</button><button class="filter" data-filter="suggestion">${currentLanguage === "zh" ? "\u5efa\u8bae" : "Suggestion"}</button><button class="filter" data-filter="editText">${currentLanguage === "zh" ? "\u4fee\u6539" : "Edit"}</button><button class="filter" data-filter="deleteContent">${currentLanguage === "zh" ? "\u5220\u9664" : "Delete"}</button></div></div><div class="comment-scroll" id="comments"></div></aside>
+</div>
+<div class="preview" id="preview"><img alt=""></div>
+<script>
+const data=${json};
+const video=document.querySelector("#video"),frame=document.querySelector("#videoFrame"),layer=document.querySelector("#layer"),missing=document.querySelector("#missing"),fileInput=document.querySelector("#fileInput"),play=document.querySelector("#play"),timeline=document.querySelector("#timeline"),time=document.querySelector("#time"),markers=document.querySelector("#markers"),wave=document.querySelector("#wave"),comments=document.querySelector("#comments"),count=document.querySelector("#count"),preview=document.querySelector("#preview"),previewImg=preview.querySelector("img");
+const annotations=data.annotations.filter(a=>Number.isFinite(a.videoTime)).sort((a,b)=>a.videoTime-b.videoTime||Number(a.renderIndex||0)-Number(b.renderIndex||0));
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function clamp(v,min,max){return Math.min(max,Math.max(min,v))}
+function fmt(s){s=Math.max(0,Number(s)||0);const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),d=Math.floor((s%1)*10);return h>0?String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0")+"."+d:String(m).padStart(2,"0")+":"+String(sec).padStart(2,"0")+"."+d}
+function text(a){return a.text||a.fallbackText||""}
+function color(a){return a.color||"#00c2a8"}
+function setSource(src){video.src=src;video.load()}
+function showMissing(){missing.classList.add("show")}
+function hideMissing(){missing.classList.remove("show")}
+frame.style.aspectRatio=(data.video?.width||16)+"/"+(data.video?.height||9);
+setSource(data.video?.src||data.video?.fileName||"");
+video.addEventListener("error",showMissing);
+video.addEventListener("loadedmetadata",()=>{hideMissing();if(data.video?.currentTime&&!video.dataset.seeked){video.dataset.seeked="1";video.currentTime=Math.min(data.video.currentTime,video.duration||data.video.currentTime)}sync()});
+fileInput.addEventListener("change",()=>{const file=fileInput.files&&fileInput.files[0];if(!file)return;setSource(URL.createObjectURL(file));hideMissing()});
+play.addEventListener("click",()=>{if(video.paused)video.play().catch(()=>{});else video.pause();sync()});
+timeline.addEventListener("input",()=>{const d=duration();video.currentTime=d*(Number(timeline.value)/1000);video.pause();sync()});
+function duration(){return Number.isFinite(video.duration)?video.duration:(data.video?.duration||0)}
+function current(){return Number.isFinite(video.currentTime)?video.currentTime:0}
+function createMark(a){const el=document.createElement("div");el.className=a.type==="mark"?"mark":"dot-wrap";el.dataset.id=a.id;el.style.setProperty("--c",color(a));el.style.left=a.x+"%";el.style.top=a.y+"%";if(a.type==="mark"){el.style.width=a.width+"%";el.style.height=a.height+"%";if(a.intent==="deleteContent")el.classList.add("delete")}else{el.innerHTML='<span class="dot"></span>'}const num=document.createElement("span");num.className="avatar";num.textContent=a.renderIndex||"";const tip=document.createElement("div");tip.className="tip";tip.textContent=text(a);el.append(num,tip);return el}
+function renderLayer(){const t=current();layer.replaceChildren();annotations.filter(a=>Math.abs(a.videoTime-t)<=.35).forEach(a=>layer.append(createMark(a)));syncActive(t)}
+function syncActive(t){document.querySelectorAll(".playback-active").forEach(el=>el.classList.remove("playback-active"));const active=annotations.map(a=>({a,d:Math.abs(a.videoTime-t)})).filter(x=>x.d<=.35).sort((a,b)=>a.d-b.d)[0]?.a;if(!active)return;document.querySelectorAll('[data-id="'+CSS.escape(active.id)+'"]').forEach(el=>el.classList.add("playback-active"))}
+function sync(){const d=duration(),t=current();time.textContent=fmt(t)+" / "+fmt(d);timeline.value=d?String(Math.round(t/d*1000)):"0";play.textContent=video.paused?"▶":"⏸";renderLayer();drawWave()}
+["timeupdate","play","pause","seeked","loadeddata"].forEach(e=>video.addEventListener(e,sync));
+annotations.forEach(a=>{const m=document.createElement("button");m.className="marker";m.type="button";m.dataset.id=a.id;m.style.setProperty("--c",color(a));m.style.left=clamp(a.videoTime/Math.max(.001,data.video?.duration||0)*100,0,100)+"%";m.title=fmt(a.videoTime)+" · "+a.intentLabel+" "+text(a);m.addEventListener("click",()=>{video.currentTime=a.videoTime;video.pause();sync()});m.addEventListener("mouseenter",()=>setActive(a.id,true));m.addEventListener("mouseleave",()=>setActive(a.id,false));markers.append(m)});
+const groups=new Map();annotations.forEach(a=>{const key=data.video?.name||data.title;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(a)});count.textContent=annotations.length;[...groups.entries()].forEach(([name,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+esc(name)+'</span><span>'+items.length+'</span></div>';items.forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",color(a));card.innerHTML='<span class="num">'+esc(a.renderIndex||"")+'</span><div><div class="card-title"><strong>'+esc(a.intentLabel)+'</strong><span>'+fmt(a.videoTime)+'</span></div><p>'+esc(text(a))+'</p></div>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"");card.addEventListener("click",()=>{video.currentTime=a.videoTime;video.pause();document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");sync()});g.append(card)});comments.append(g)});
+function setActive(id,on){document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
+document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));
+document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,true);const img=e.target.closest(".thumb");if(img){previewImg.src=img.src;preview.classList.add("open")}});
+document.addEventListener("mouseout",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,false);if(e.target.closest(".thumb"))preview.classList.remove("open")});
+document.addEventListener("mousemove",e=>{if(!preview.classList.contains("open"))return;preview.style.left=Math.min(innerWidth-540,e.clientX+14)+"px";preview.style.top=Math.max(12,Math.min(innerHeight-360,e.clientY+14))+"px"});
+function drawShape(ctx,samples,o){const n=Math.max(1,Math.floor(o.w));const vals=Array.from({length:n},(_,i)=>{const s=i/Math.max(1,n-1)*Math.max(0,samples.length-1),l=Math.floor(s),r=Math.min(samples.length-1,l+1),mix=s-l;return clamp((Number(samples[l])||0)*(1-mix)+(Number(samples[r])||0)*mix,0,1)});ctx.save();ctx.globalAlpha=o.a;ctx.fillStyle=o.c;ctx.beginPath();ctx.moveTo(o.x,o.y);vals.forEach((v,i)=>{const p=vals[Math.max(0,i-1)],nx=vals[Math.min(vals.length-1,i+1)],amp=Math.max(1,(p+v*2+nx)/4*o.h);ctx.lineTo(o.x+i,o.y-amp)});for(let i=vals.length-1;i>=0;i--){const p=vals[Math.max(0,i-1)],nx=vals[Math.min(vals.length-1,i+1)],amp=Math.max(1,(p+vals[i]*2+nx)/4*o.h);ctx.lineTo(o.x+i,o.y+amp)}ctx.closePath();ctx.fill();ctx.restore()}
+function drawWave(){const r=wave.getBoundingClientRect(),dpr=devicePixelRatio||1,w=Math.max(320,Math.round((r.width||720)*dpr)),h=Math.max(38,Math.round((r.height||54)*dpr));if(wave.width!==w)wave.width=w;if(wave.height!==h)wave.height=h;const ctx=wave.getContext("2d");ctx.clearRect(0,0,w,h);ctx.fillStyle="#151720";ctx.fillRect(0,0,w,h);const samples=data.video?.waveform?.length?data.video.waveform:Array.from({length:96},(_,i)=>.08+Math.sin(i*.65)*.025),inset=Math.round(9*dpr),dw=Math.max(1,w-inset*2),center=h/2,wh=Math.max(2,center-Math.round(7*dpr)),p=duration()?clamp(current()/duration(),0,1):0;ctx.fillStyle="rgba(255,255,255,.12)";ctx.fillRect(inset,Math.round(center),dw,Math.max(1,dpr));drawShape(ctx,samples,{x:inset,y:center,w:dw,h:wh,c:"rgba(136,142,155,.42)",a:1});ctx.save();ctx.beginPath();ctx.rect(inset,0,dw*p,h);ctx.clip();drawShape(ctx,samples,{x:inset,y:center,w:dw,h:wh,c:"#00c2a8",a:.95});ctx.restore();ctx.fillStyle="rgba(255,255,255,.88)";ctx.fillRect(Math.round(inset+dw*p)-1,0,2,h)}
+requestAnimationFrame(sync);
+</script>
+</body>
+</html>`;
+}
+
 function createStaticBoardHtml(payload) {
   const json = JSON.stringify(payload).replace(/</g, "\\u003c");
   return `<!doctype html>
@@ -4936,6 +5289,10 @@ document.addEventListener("mouseout",e=>{if(e.target.closest(".thumb,.refs img")
 
 function sanitizeFilename(name) {
   return String(name).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 80) || "pointking-review";
+}
+
+function createStaticVideoSource(name) {
+  return `./${String(name || "").split("/").map((part) => encodeURIComponent(part)).join("/")}`;
 }
 
 function escapeHtml(value) {
