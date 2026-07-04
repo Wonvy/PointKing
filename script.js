@@ -2459,6 +2459,7 @@ function drawMark(layer, annotation) {
   box.className = "annotation-ui mark-box";
   box.classList.add(`intent-${getAnnotationIntent(annotation)}`);
   if (Number.isFinite(annotation.videoTime)) box.classList.add("video-annotation");
+  if (isFullFrameVideoAnnotation(annotation)) box.classList.add("video-full-frame-annotation");
   if (annotation.preview) box.classList.add("previewing");
   if (isAnnotationEditing(annotation)) box.classList.add("editing");
   box.dataset.annotationId = annotation.id;
@@ -2510,6 +2511,17 @@ function drawMark(layer, annotation) {
   }
   drawAnnotationDetailCallout(layer, annotation);
   renderLucideIcons();
+}
+
+function isFullFrameVideoAnnotation(annotation) {
+  return (
+    Number.isFinite(annotation?.videoTime) &&
+    annotation?.type === "mark" &&
+    Number(annotation.x) <= 0.01 &&
+    Number(annotation.y) <= 0.01 &&
+    Number(annotation.width) >= 99.99 &&
+    Number(annotation.height) >= 99.99
+  );
 }
 
 function updateDragPreview(event, page) {
@@ -5015,8 +5027,8 @@ function createStaticVideoBoardPreview(payload) {
     marker.title = `${format(annotation.videoTime)} \u00b7 ${annotation.intentLabel} ${annotation.text || annotation.fallbackText || ""}`;
     marker.textContent = String(annotation.renderIndex || "");
     marker.addEventListener("click", () => {
-      video.currentTime = annotation.videoTime;
       video.pause();
+      video.currentTime = annotation.videoTime;
       sync();
     });
     marker.addEventListener("pointerenter", () => setStaticPreviewLinkedActive(preview, annotation.id, true));
@@ -5031,8 +5043,8 @@ function createStaticVideoBoardPreview(payload) {
   });
   timeline.addEventListener("input", () => {
     const duration = Number.isFinite(video.duration) ? video.duration : payload.video?.duration || 0;
-    video.currentTime = duration * (Number(timeline.value) / 1000);
     video.pause();
+    video.currentTime = duration * (Number(timeline.value) / 1000);
     sync();
   });
   fileInput.addEventListener("change", () => {
@@ -5051,6 +5063,20 @@ function createStaticVideoBoardPreview(payload) {
   if (payload.video?.currentTime) video.currentTime = payload.video.currentTime;
   if (!video.src) missing.classList.add("show");
   requestAnimationFrame(sync);
+
+  preview.addEventListener("click", (event) => {
+    const card = event.target.closest(".export-html-comment");
+    if (!card || !preview.contains(card)) return;
+    const annotation = videoAnnotations.find((item) => item.id === card.dataset.annotationId);
+    if (!annotation) return;
+    event.preventDefault();
+    event.stopPropagation();
+    video.pause();
+    video.currentTime = annotation.videoTime;
+    preview.querySelectorAll(".export-html-comment.active").forEach((item) => item.classList.remove("active"));
+    card.classList.add("active");
+    sync();
+  });
 
   bindStaticBoardPreviewLinks(preview);
   bindStaticBoardPreviewFilters(preview);
@@ -5227,8 +5253,8 @@ function renderLayer(){const t=current();layer.replaceChildren();annotations.fil
 function syncActive(t){document.querySelectorAll(".playback-active").forEach(el=>el.classList.remove("playback-active"));const active=annotations.map(a=>({a,d:Math.abs(a.videoTime-t)})).filter(x=>x.d<=.35).sort((a,b)=>a.d-b.d)[0]?.a;if(!active)return;document.querySelectorAll('[data-id="'+CSS.escape(active.id)+'"]').forEach(el=>el.classList.add("playback-active"))}
 function sync(){const d=duration(),t=current();time.textContent=fmt(t)+" / "+fmt(d);timeline.value=d?String(Math.round(t/d*1000)):"0";play.textContent=video.paused?"▶":"⏸";renderLayer();drawWave()}
 ["timeupdate","play","pause","seeked","loadeddata"].forEach(e=>video.addEventListener(e,sync));
-annotations.forEach(a=>{const m=document.createElement("button");m.className="marker";m.type="button";m.dataset.id=a.id;m.style.setProperty("--c",color(a));m.style.left=clamp(a.videoTime/Math.max(.001,data.video?.duration||0)*100,0,100)+"%";m.title=fmt(a.videoTime)+" · "+a.intentLabel+" "+text(a);m.addEventListener("click",()=>{video.currentTime=a.videoTime;video.pause();sync()});m.addEventListener("mouseenter",()=>setActive(a.id,true));m.addEventListener("mouseleave",()=>setActive(a.id,false));markers.append(m)});
-const groups=new Map();annotations.forEach(a=>{const key=data.video?.name||data.title;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(a)});count.textContent=annotations.length;[...groups.entries()].forEach(([name,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+esc(name)+'</span><span>'+items.length+'</span></div>';items.forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",color(a));card.innerHTML='<span class="num">'+esc(a.renderIndex||"")+'</span><div><div class="card-title"><strong>'+esc(a.intentLabel)+'</strong><span>'+fmt(a.videoTime)+'</span></div><p>'+esc(text(a))+'</p></div>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"");card.addEventListener("click",()=>{video.currentTime=a.videoTime;video.pause();document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");sync()});g.append(card)});comments.append(g)});
+annotations.forEach(a=>{const m=document.createElement("button");m.className="marker";m.type="button";m.dataset.id=a.id;m.style.setProperty("--c",color(a));m.style.left=clamp(a.videoTime/Math.max(.001,data.video?.duration||0)*100,0,100)+"%";m.title=fmt(a.videoTime)+" · "+a.intentLabel+" "+text(a);m.addEventListener("click",()=>{video.pause();video.currentTime=a.videoTime;sync()});m.addEventListener("mouseenter",()=>setActive(a.id,true));m.addEventListener("mouseleave",()=>setActive(a.id,false));markers.append(m)});
+const groups=new Map();annotations.forEach(a=>{const key=data.video?.name||data.title;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(a)});count.textContent=annotations.length;[...groups.entries()].forEach(([name,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+esc(name)+'</span><span>'+items.length+'</span></div>';items.forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",color(a));card.innerHTML='<span class="num">'+esc(a.renderIndex||"")+'</span><div><div class="card-title"><strong>'+esc(a.intentLabel)+'</strong><span>'+fmt(a.videoTime)+'</span></div><p>'+esc(text(a))+'</p></div>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"");card.addEventListener("click",()=>{video.pause();video.currentTime=a.videoTime;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");sync()});g.append(card)});comments.append(g)});
 function setActive(id,on){document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
 document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));
 document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,true);const img=e.target.closest(".thumb");if(img){previewImg.src=img.src;preview.classList.add("open")}});

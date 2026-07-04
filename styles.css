@@ -3164,6 +3164,18 @@ html[data-theme="light"] .placeholder {
     0 0 14px color-mix(in srgb, var(--annotation-color, #ff6b6b) 20%, transparent);
 }
 
+.mark-box.video-full-frame-annotation:not(.editing):not(.moving):not(.resizing) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.mark-box.video-full-frame-annotation:not(.editing):not(.moving):not(.resizing) .arrow-anchor,
+.mark-box.video-full-frame-annotation:not(.editing):not(.moving):not(.resizing) .resize-corner {
+  display: none;
+}
+
 .arrow-anchor {
   --control-scale: var(--inverse-zoom, 1);
   position: absolute;
