@@ -39,6 +39,7 @@ const detailToggleBtn = document.querySelector("#detailToggleBtn");
 const commentList = document.querySelector("#commentList");
 const commentCount = document.querySelector("#commentCount");
 const commentSearch = document.querySelector("#commentSearch");
+const commentViewSelect = document.querySelector("#commentViewSelect");
 const commentFilterTabs = document.querySelector("#commentFilterTabs");
 const brandName = document.querySelector("#brandName");
 const brandSub = document.querySelector("#brandSub");
@@ -106,6 +107,12 @@ const translations = {
     renameDocument: "\u91cd\u547d\u540d",
     renameDocumentPrompt: "\u8f93\u5165\u65b0\u6587\u6863\u540d\u79f0",
     searchAnnotations: "\u641c\u7d22\u6279\u6ce8",
+    annotationView: "\u6279\u6ce8\u89c6\u56fe",
+    richView: "\u56fe\u6587",
+    thumbnailView: "\u7f29\u7565\u56fe",
+    textView: "\u6587\u672c",
+    videoQuickCommentPlaceholder: "\u8f93\u5165\u5f53\u524d\u753b\u9762\u6279\u6ce8",
+    addVideoComment: "\u6dfb\u52a0",
     filterAll: "\u5168\u90e8",
     confirmClearTitle: "\u5220\u9664\u5168\u90e8\u6279\u6ce8\uff1f",
     confirmClearBody: "\u6b64\u64cd\u4f5c\u4f1a\u5220\u9664\u53f3\u4fa7\u5217\u8868\u548c\u753b\u5e03\u4e0a\u7684\u6240\u6709\u6279\u6ce8\uff0c\u65e0\u6cd5\u64a4\u56de\u3002",
@@ -186,6 +193,12 @@ const translations = {
     renameDocument: "Rename",
     renameDocumentPrompt: "Enter a new document name",
     searchAnnotations: "Search annotations",
+    annotationView: "Annotation view",
+    richView: "Text and images",
+    thumbnailView: "Thumbnails",
+    textView: "Text only",
+    videoQuickCommentPlaceholder: "Comment on the current frame",
+    addVideoComment: "Add",
     filterAll: "All",
     confirmClearTitle: "Delete all annotations?",
     confirmClearBody: "This removes every annotation from the list and canvas. This action cannot be undone.",
@@ -236,6 +249,8 @@ const themeStorageKey = "pointking.theme";
 const magnifierScaleStorageKey = "pointking.magnifierScale";
 const detailCalloutsStorageKey = "pointking.detailCallouts";
 const submitModeStorageKey = "pointking.submitMode";
+const commentThumbnailsStorageKey = "pointking.commentThumbnails";
+const commentViewModeStorageKey = "pointking.commentViewMode";
 const defaultAnnotationColor = "#6e7cff";
 const annotationColors = ["#6e7cff", "#00c2a8", "#ff6b6b", "#f5a524", "#8b5cf6"];
 const annotationIntentColors = {
@@ -251,6 +266,7 @@ let currentLanguage = localStorage.getItem(languageStorageKey) || "zh";
 let currentTheme = localStorage.getItem(themeStorageKey) || "dark";
 let detailCalloutsVisible = localStorage.getItem(detailCalloutsStorageKey) === "true";
 let submitMode = localStorage.getItem(submitModeStorageKey) === "ctrlEnter" ? "ctrlEnter" : "enter";
+let commentViewMode = getStoredCommentViewMode();
 let currentDocumentKey = null;
 let documentCatalog = loadDocumentCatalog();
 let selectedDocumentKeys = new Set();
@@ -287,6 +303,8 @@ let commentSearchQuery = "";
 let commentFilterIntent = "all";
 let commentImagePreviewTimer = null;
 let commentHoverToken = 0;
+let focusedCommentToken = 0;
+let focusedCommentId = null;
 let mobilePanelsInitialized = false;
 let mobileAnnotationDock = null;
 let mobileStableViewportHeight = 0;
@@ -295,7 +313,15 @@ let creatingBlankDocument = false;
 let currentVideo = null;
 let videoRenderFrame = null;
 let videoHoverActive = false;
+let videoBlankPointer = null;
+let videoClickTimer = null;
+let videoPointAnnotationLockUntil = 0;
+let videoRegionPreviewRunning = false;
+let videoTimelineZoom = 1;
+let videoTimelineZoomValueTimer = null;
+let videoPlaybackActiveAnnotationId = null;
 const pendingRegionPreviewIds = new Set();
+const pendingVideoRegionPreviewIds = new Set();
 const collapsedCommentGroups = new Set();
 const activeCanvasPointers = new Map();
 
@@ -318,6 +344,7 @@ renderLucideIcons();
 syncMobileViewportGeometry();
 setCurrentTool(currentTool);
 syncDetailToggleState();
+syncCommentViewSelectState();
 activateMobileAnnotationTool();
 syncMagnifierDefaultForLayout();
 
@@ -530,6 +557,12 @@ canvasViewport.addEventListener("pointerdown", (event) => {
 
   startMagnifierHold(event, page);
 
+  if (beginVideoBlankInteraction(event, page)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
   if (hasOpenAnnotationEditor()) {
     if (isMobileLayout()) {
       event.preventDefault();
@@ -609,6 +642,8 @@ canvasViewport.addEventListener("pointermove", (event) => {
     updateMagnifier(event);
   }
 
+  if (updateVideoBlankInteraction(event)) return;
+
   if (dragPreview && dragStart && currentTool === "mark") {
     const page = event.target.closest(".doc-page") || pageStack.querySelector(`.doc-page[data-page-id="${dragPreview.pageId}"]`);
     if (!page) return;
@@ -652,6 +687,8 @@ canvasViewport.addEventListener("pointerup", (event) => {
   if (event.pointerId === magnifierPointerId) {
     stopMagnifier();
   }
+
+  if (endVideoBlankInteraction(event)) return;
 
   if (isPanning) {
     endPan(event);
@@ -708,6 +745,10 @@ canvasViewport.addEventListener("pointercancel", (event) => {
     if (dragPreview?.preview) return;
   }
   if (event.pointerId === magnifierPointerId) stopMagnifier();
+  if (videoBlankPointer?.pointerId === event.pointerId) {
+    videoBlankPointer = null;
+    cancelPendingVideoClick();
+  }
   dragStart = null;
   dragEndPoint = null;
   dragPreview = null;
@@ -717,6 +758,8 @@ canvasViewport.addEventListener("pointercancel", (event) => {
 canvasViewport.addEventListener("dblclick", (event) => {
   const page = getCanvasEventPage(event);
   if (!isMobileLayout() && page && !event.target.closest(".annotation-editor, .annotation-ui")) {
+    if (handleVideoPointAnnotationDoubleClick(event, page)) return;
+    cancelPendingVideoClick();
     event.preventDefault();
     event.stopPropagation();
     createPointAnnotationFromDoubleClickEvent(event, page);
@@ -730,6 +773,7 @@ canvasViewport.addEventListener("dblclick", (event) => {
 
 canvasViewport.addEventListener("click", (event) => {
   const page = getCanvasEventPage(event);
+  if (page?.dataset.mediaType === "video") return;
   if (isMobileLayout() || event.detail < 2 || !page || event.target.closest(".annotation-editor, .annotation-ui")) return;
   event.preventDefault();
   event.stopPropagation();
@@ -760,6 +804,12 @@ commentSearch.addEventListener("input", () => {
   renderAnnotations();
 });
 
+commentViewSelect.addEventListener("change", () => {
+  commentViewMode = getValidCommentViewMode(commentViewSelect.value);
+  localStorage.setItem(commentViewModeStorageKey, commentViewMode);
+  syncCommentViewSelectState();
+});
+
 commentList.addEventListener("click", (event) => {
   const comment = event.target.closest("[data-annotation-id]");
   if (!comment) return;
@@ -773,7 +823,7 @@ commentList.addEventListener("mouseover", async (event) => {
 
   const annotationId = comment.dataset.annotationId;
   const token = ++commentHoverToken;
-  await seekVideoToAnnotation(annotationId);
+  if (!isVideoAnnotation(annotationId)) await seekVideoToAnnotation(annotationId);
   const hoveredComment = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-annotation-id]");
   if (token !== commentHoverToken || hoveredComment?.dataset.annotationId !== annotationId) return;
   if (!isVideoAnnotation(annotationId)) setAnnotationFocusMask(annotationId, true);
@@ -862,6 +912,8 @@ function applyLanguage() {
   placeholderCopy.textContent = t("placeholderCopy");
   commentSearch.placeholder = t("searchAnnotations");
   commentSearch.setAttribute("aria-label", t("searchAnnotations"));
+  syncCommentViewSelectState();
+  syncVideoQuickCommentLanguage();
   languageText.textContent = currentLanguage === "zh" ? "EN" : "\u4e2d";
   languageBtn.title = currentLanguage === "zh" ? "English" : "\u4e2d\u6587";
   languageBtn.setAttribute("aria-label", currentLanguage === "zh" ? "Switch to English" : "\u5207\u6362\u5230\u4e2d\u6587");
@@ -949,6 +1001,43 @@ function syncDetailToggleState() {
   app.classList.toggle("details-visible", detailCalloutsVisible);
   detailToggleBtn.classList.toggle("active", detailCalloutsVisible);
   detailToggleBtn.setAttribute("aria-pressed", String(detailCalloutsVisible));
+}
+
+function getStoredCommentViewMode() {
+  const stored = localStorage.getItem(commentViewModeStorageKey);
+  if (stored) return getValidCommentViewMode(stored);
+  return localStorage.getItem(commentThumbnailsStorageKey) === "false" ? "text" : "rich";
+}
+
+function getValidCommentViewMode(value) {
+  if (value === "media") return "thumbnail";
+  return ["rich", "thumbnail", "text"].includes(value) ? value : "rich";
+}
+
+function syncCommentViewSelectState() {
+  if (!commentViewSelect) return;
+  commentViewSelect.setAttribute("aria-label", t("annotationView"));
+  commentViewSelect.title = t("annotationView");
+  [...commentViewSelect.options].forEach((option) => {
+    const labels = {
+      rich: t("richView"),
+      thumbnail: t("thumbnailView"),
+      text: t("textView"),
+    };
+    option.textContent = labels[option.value] || option.value;
+  });
+  commentViewSelect.value = commentViewMode;
+  commentList?.classList.toggle("view-text", commentViewMode === "text");
+  commentList?.classList.toggle("view-thumbnail", commentViewMode === "thumbnail");
+}
+
+function syncVideoQuickCommentLanguage() {
+  const controls = currentVideo?.controls;
+  if (!controls) return;
+  controls.quickCommentInput.placeholder = t("videoQuickCommentPlaceholder");
+  controls.quickCommentInput.setAttribute("aria-label", t("videoQuickCommentPlaceholder"));
+  controls.quickCommentButton.textContent = t("addVideoComment");
+  controls.timelineZoomSlider?.setAttribute("aria-label", currentLanguage === "zh" ? "\u65f6\u95f4\u8f74\u7f29\u653e" : "Timeline zoom");
 }
 
 function handleToolShortcut(event) {
@@ -1917,6 +2006,26 @@ function getVideoPage() {
   return pageStack.querySelector(".doc-page.video-page");
 }
 
+function isVideoPageId(pageId) {
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${pageId}"]`);
+  return page?.dataset.mediaType === "video";
+}
+
+function getVideoDocumentDisplayName() {
+  const statusName = statusFileName?.textContent?.trim();
+  if (statusName && statusName !== "\u672a\u9009\u62e9\u6587\u4ef6") return statusName;
+  return currentVideo?.name || (currentLanguage === "zh" ? "\u89c6\u9891" : "Video");
+}
+
+function updateVideoPageBadge(page = getVideoPage()) {
+  if (!page?.classList.contains("video-page")) return;
+  const label = getVideoDocumentDisplayName();
+  const badgeText = page.querySelector(".page-badge > span");
+  if (badgeText) badgeText.textContent = label;
+  const deleteButton = page.querySelector(".page-delete");
+  deleteButton?.setAttribute("aria-label", `${t("confirmDelete")} ${label}`);
+}
+
 function shouldSpaceToggleVideo(event) {
   return videoHoverActive && isVideoDocumentActive() && !isKeyboardControlTarget(event.target) && !hasOpenAnnotationEditor();
 }
@@ -1926,6 +2035,13 @@ function toggleCurrentVideoPlayback() {
   const video = currentVideo.video;
   if (video.paused) video.play().catch(() => {});
   else video.pause();
+  updateVideoControls();
+}
+
+function pauseCurrentVideoForAnnotation() {
+  if (!isVideoDocumentActive()) return;
+  currentVideo.video.pause();
+  drawCurrentVideoFrame();
   updateVideoControls();
 }
 
@@ -1944,6 +2060,34 @@ function stampAnnotationVideoTime(annotation) {
   return annotation;
 }
 
+function addCurrentFrameVideoComment(value) {
+  if (!isVideoDocumentActive()) return;
+  const text = String(value || "").trim();
+  if (!text) return;
+  const page = getVideoPage();
+  if (!page) return;
+
+  pauseCurrentVideoForAnnotation();
+  const annotation = addAnnotation({
+    type: "mark",
+    pageId: page.dataset.pageId,
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    text,
+    intent: "suggestion",
+    color: getAnnotationIntentColor("suggestion"),
+    draft: false,
+  });
+  annotation.videoTime = getVideoTimeForPage(annotation.pageId) ?? 0;
+  updateAnnotationRegionImage(annotation);
+  touchAnnotation(annotation);
+  saveAnnotations();
+  renderAnnotations();
+  setFocusedComment(annotation.id);
+}
+
 function formatVideoTime(seconds = 0) {
   const safeSeconds = Math.max(0, Number(seconds) || 0);
   const total = Math.floor(safeSeconds);
@@ -1952,8 +2096,8 @@ function formatVideoTime(seconds = 0) {
   const secs = total % 60;
   const fraction = Math.floor((safeSeconds - total) * 10);
   const base = hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
-    : `${minutes}:${String(secs).padStart(2, "0")}`;
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   return `${base}.${fraction}`;
 }
 
@@ -2009,6 +2153,10 @@ function maybeCreatePointAnnotationFromPointerUp(event) {
     lastCanvasPointClick = null;
     return false;
   }
+  if (page.dataset.mediaType === "video") {
+    lastCanvasPointClick = null;
+    return false;
+  }
 
   const now = Date.now();
   const previous = lastCanvasPointClick;
@@ -2029,6 +2177,24 @@ function maybeCreatePointAnnotationFromPointerUp(event) {
   return true;
 }
 
+function handleVideoPointAnnotationDoubleClick(event, page) {
+  if (page?.dataset.mediaType !== "video") return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+  cancelPendingVideoClick();
+  videoBlankPointer = null;
+  pauseCurrentVideoForAnnotation();
+
+  const now = Date.now();
+  if (now < videoPointAnnotationLockUntil) return true;
+  videoPointAnnotationLockUntil = now + 420;
+
+  removeEmptyDraftAnnotations();
+  createPointAnnotationFromDoubleClickEvent(event, page);
+  return true;
+}
+
 function getCanvasEventPage(event) {
   const directPage = event.target.closest?.(".doc-page");
   if (directPage) return directPage;
@@ -2037,6 +2203,114 @@ function getCanvasEventPage(event) {
     const rect = page.getBoundingClientRect();
     return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
   }) || null;
+}
+
+function isVideoBlankAnnotationTarget(event, page) {
+  return (
+    page?.dataset.mediaType === "video" &&
+    event.button === 0 &&
+    !isMobileLayout() &&
+    !event.target.closest(".annotation-editor, .annotation-ui, .video-controls")
+  );
+}
+
+function beginVideoBlankInteraction(event, page) {
+  if (!isVideoBlankAnnotationTarget(event, page) || hasOpenAnnotationEditor()) return false;
+  cancelPendingVideoClick();
+  removeEmptyDraftAnnotations();
+  const point = getPagePoint(event, page);
+  videoBlankPointer = {
+    pointerId: event.pointerId,
+    pageId: page.dataset.pageId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startPoint: point,
+    dragging: false,
+  };
+  dragStart = null;
+  dragEndPoint = null;
+  dragPreview = null;
+  return true;
+}
+
+function updateVideoBlankInteraction(event) {
+  if (!videoBlankPointer || event.pointerId !== videoBlankPointer.pointerId) return false;
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${videoBlankPointer.pageId}"]`);
+  if (!page) return true;
+
+  const distance = Math.hypot(event.clientX - videoBlankPointer.startClientX, event.clientY - videoBlankPointer.startClientY);
+  if (!videoBlankPointer.dragging && distance > 5) {
+    videoBlankPointer.dragging = true;
+    pauseCurrentVideoForAnnotation();
+    dragStart = videoBlankPointer.startPoint;
+    dragEndPoint = dragStart;
+    dragPreview = addAnnotation({
+      type: "mark",
+      pageId: page.dataset.pageId,
+      x: dragStart.x,
+      y: dragStart.y,
+      width: 0,
+      height: 0,
+      text: "",
+      draft: true,
+      preview: true,
+    });
+  }
+
+  if (videoBlankPointer.dragging && dragPreview) {
+    updateDragPreview(event, page);
+  }
+  return true;
+}
+
+function endVideoBlankInteraction(event) {
+  if (!videoBlankPointer || event.pointerId !== videoBlankPointer.pointerId) return false;
+  const interaction = videoBlankPointer;
+  videoBlankPointer = null;
+  const page = pageStack.querySelector(`.doc-page[data-page-id="${interaction.pageId}"]`);
+
+  if (interaction.dragging && page && dragPreview) {
+    finishDragAnnotation(event, page);
+    return true;
+  }
+
+  dragStart = null;
+  dragEndPoint = null;
+  dragPreview = null;
+  scheduleVideoBlankClickToggle();
+  return true;
+}
+
+function finishDragAnnotation(event, page) {
+  const end = dragEndPoint || getPagePoint(event, page);
+  const distance = Math.hypot(end.x - dragStart.x, end.y - dragStart.y);
+  if (distance > 2) {
+    dragPreview.preview = false;
+    dragPreview.width = Math.max(4, dragPreview.width);
+    dragPreview.height = Math.max(0, dragPreview.height);
+    renderAnnotations();
+    focusAnnotationInput(dragPreview.id);
+  } else {
+    annotations = annotations.filter((annotation) => annotation.id !== dragPreview.id);
+    renderAnnotations();
+  }
+  dragStart = null;
+  dragEndPoint = null;
+  dragPreview = null;
+}
+
+function scheduleVideoBlankClickToggle() {
+  cancelPendingVideoClick();
+  videoClickTimer = window.setTimeout(() => {
+    videoClickTimer = null;
+    toggleCurrentVideoPlayback();
+  }, 220);
+}
+
+function cancelPendingVideoClick() {
+  if (!videoClickTimer) return;
+  window.clearTimeout(videoClickTimer);
+  videoClickTimer = null;
 }
 
 function createTextAnnotationAtEvent(event, page) {
@@ -2093,9 +2367,11 @@ function renderAnnotations() {
   });
 
   renderCommentGroups(groupedComments);
+  syncFocusedCommentActive();
   commentCount.textContent = `(${renderedCommentCount})`;
   statusCommentCount.textContent = String(renderedCommentCount);
   renderVideoTimelineMarkers();
+  syncVideoPlaybackActiveAnnotation();
   renderLucideIcons();
 }
 
@@ -2104,13 +2380,26 @@ function getAnnotationOrderMap() {
     annotations
       .filter(isPersistableAnnotation)
       .slice()
-      .sort((first, second) => {
-        const pageDelta = Number(first.pageId) - Number(second.pageId);
-        if (pageDelta) return pageDelta;
-        return getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second);
-      })
+      .sort(compareAnnotationsForDisplay)
       .map((annotation, index) => [annotation.id, index + 1]),
   );
+}
+
+function compareAnnotationsForDisplay(first, second) {
+  const firstIsVideo = Number.isFinite(first.videoTime);
+  const secondIsVideo = Number.isFinite(second.videoTime);
+  const pageDelta = Number(first.pageId) - Number(second.pageId);
+  if (pageDelta) return pageDelta;
+
+  if (firstIsVideo || secondIsVideo) {
+    if (firstIsVideo && secondIsVideo) {
+      const timeDelta = first.videoTime - second.videoTime;
+      if (timeDelta) return timeDelta;
+    }
+    if (firstIsVideo !== secondIsVideo) return firstIsVideo ? -1 : 1;
+  }
+
+  return getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second);
 }
 
 function renderCommentFilterTabs() {
@@ -2169,6 +2458,7 @@ function drawMark(layer, annotation) {
   const box = document.createElement("div");
   box.className = "annotation-ui mark-box";
   box.classList.add(`intent-${getAnnotationIntent(annotation)}`);
+  if (Number.isFinite(annotation.videoTime)) box.classList.add("video-annotation");
   if (annotation.preview) box.classList.add("previewing");
   if (isAnnotationEditing(annotation)) box.classList.add("editing");
   box.dataset.annotationId = annotation.id;
@@ -2374,6 +2664,7 @@ function updateAnnotationArrow(annotation) {
 function drawTextNote(layer, annotation) {
   const note = document.createElement("div");
   note.className = "annotation-ui text-note";
+  if (Number.isFinite(annotation.videoTime)) note.classList.add("video-annotation");
   if (isAnnotationEditing(annotation)) note.classList.add("editing");
   note.dataset.annotationId = annotation.id;
   note.style.left = `${annotation.x}%`;
@@ -2402,12 +2693,15 @@ function drawTextNote(layer, annotation) {
 function createAnnotationIndexBadge(annotation) {
   const badge = document.createElement("span");
   badge.className = "annotation-index-badge";
-  badge.textContent = annotation.renderIndex ? String(annotation.renderIndex) : "";
+  const renderIndex = annotation.renderIndex ? String(annotation.renderIndex) : "";
+  badge.textContent = renderIndex;
+  badge.hidden = !renderIndex;
   return badge;
 }
 
 function drawAnnotationDetailCallout(layer, annotation) {
   if (!detailCalloutsVisible || annotation.draft || annotation.preview || !isPersistableAnnotation(annotation)) return;
+  if (Number.isFinite(annotation.videoTime)) return;
 
   const side = getAnnotationDetailSide(annotation);
   const anchor = getAnnotationDetailAnchor(annotation, side);
@@ -2674,7 +2968,7 @@ function positionAnnotationEditor(editor, annotation) {
   const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
   if (!page) return;
 
-  const pageRect = page.getBoundingClientRect();
+  const pageRect = getPageCoordinateElement(page).getBoundingClientRect();
   const viewportRect = canvasViewport.getBoundingClientRect();
   if (!pageRect.width || !pageRect.height || !viewportRect.width || !viewportRect.height) return;
 
@@ -2691,7 +2985,9 @@ function positionAnnotationEditor(editor, annotation) {
   const maxTop = ((viewportRect.bottom - viewportPadding - editorHeight - pageRect.top) / pageRect.height) * 100;
   const clampToVisible = (value, min, max) => (max < min ? min : clamp(value, min, max));
 
-  editor.classList.remove("flipped");
+  editor.classList.remove("flipped", "vertical-flipped");
+  const shouldOpenAbove = shouldFlipAnnotationEditorAbove(annotation, pageRect, editorHeight, editorGap);
+  editor.classList.toggle("vertical-flipped", shouldOpenAbove);
   if (annotation.type === "mark") {
     const markerLeftClient = pageRect.left + (annotation.x / 100) * pageRect.width;
     const markerRightClient = pageRect.left + ((annotation.x + annotation.width) / 100) * pageRect.width;
@@ -2702,13 +2998,28 @@ function positionAnnotationEditor(editor, annotation) {
       ? annotation.x - gapPct - editorWidthPct
       : annotation.x + annotation.width + gapPct;
     editor.style.left = `${clampToVisible(desiredLeft, minLeft, maxLeft)}%`;
-    editor.style.top = `${clampToVisible(annotation.y, minTop, maxTop)}%`;
+    const desiredTop = shouldOpenAbove
+      ? annotation.y + annotation.height - ((editorHeight + editorGap) / pageRect.height) * 100
+      : annotation.y;
+    editor.style.top = `${clampToVisible(desiredTop, minTop, maxTop)}%`;
     return;
   }
 
   const desiredTextLeft = annotation.x + ((14 / pageRect.width) * 100);
   editor.style.left = `${clampToVisible(desiredTextLeft, minLeft, maxLeft)}%`;
-  editor.style.top = `${clampToVisible(annotation.y, minTop, maxTop)}%`;
+  const desiredTextTop = shouldOpenAbove
+    ? annotation.y - ((editorHeight + editorGap) / pageRect.height) * 100
+    : annotation.y;
+  editor.style.top = `${clampToVisible(desiredTextTop, minTop, maxTop)}%`;
+}
+
+function shouldFlipAnnotationEditorAbove(annotation, pageRect, editorHeight, editorGap) {
+  if (!Number.isFinite(annotation.videoTime)) return false;
+  const anchorY = annotation.type === "mark" ? annotation.y + annotation.height : annotation.y;
+  const anchorClientY = pageRect.top + (anchorY / 100) * pageRect.height;
+  const spaceBelowStage = pageRect.bottom - anchorClientY;
+  const spaceBelowViewport = canvasViewport.getBoundingClientRect().bottom - anchorClientY;
+  return Math.min(spaceBelowStage, spaceBelowViewport) < editorHeight + editorGap + 8;
 }
 
 function syncAnnotationEditorPosition(annotation) {
@@ -3172,6 +3483,7 @@ function commitAnnotation(annotationId, value, intent = "suggestion") {
   annotation.text = text;
   annotation.intent = intent;
   annotation.color = getAnnotationIntentColor(intent);
+  updateAnnotationRegionImage(annotation);
   touchAnnotation(annotation);
   annotation.draft = false;
   editingAnnotationId = null;
@@ -3202,6 +3514,7 @@ function deleteAnnotation(annotationId) {
 
   annotations.splice(index, 1);
   if (editingAnnotationId === annotationId) editingAnnotationId = null;
+  if (focusedCommentId === annotationId) focusedCommentId = null;
   pendingRegionPreviewIds.delete(annotationId);
   saveAnnotations();
   renderAnnotations();
@@ -3265,6 +3578,7 @@ function bindMarkMove(box, annotation) {
       setAnnotationOperating(false);
       stopMagnifier();
       if (moved && !annotation.draft) {
+        updateAnnotationRegionImage(annotation);
         touchAnnotation(annotation);
         saveAnnotations();
         renderAnnotations();
@@ -3348,6 +3662,7 @@ function bindAnnotationArrow(handle, annotation, side) {
       handle.releasePointerCapture?.(event.pointerId);
       stopMagnifier();
       if (!annotation.draft) {
+        updateAnnotationRegionImage(annotation);
         touchAnnotation(annotation);
         saveAnnotations();
         renderAnnotations();
@@ -3480,6 +3795,7 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
       setAnnotationOperating(false);
       stopMagnifier();
       if (!annotation.draft) {
+        updateAnnotationRegionImage(annotation);
         touchAnnotation(annotation);
         saveAnnotations();
         renderAnnotations();
@@ -3506,7 +3822,7 @@ function renderCommentGroups(groupedComments) {
       const items = group.querySelector(".comment-page-items");
       pageAnnotations
         .slice()
-        .sort((first, second) => getAnnotationUpdatedAt(first) - getAnnotationUpdatedAt(second))
+        .sort(compareAnnotationsForDisplay)
         .forEach((annotation) => addComment(annotation, items));
       commentList.append(group);
     });
@@ -3525,7 +3841,7 @@ function createCommentGroup(pageId, count) {
 
   const title = document.createElement("span");
   title.className = "comment-page-title";
-  title.append(createIconPlaceholder("chevron-down"), document.createTextNode(t("page", { page: pageId })));
+  title.append(createIconPlaceholder("chevron-down"), document.createTextNode(getCommentGroupTitle(pageId)));
 
   const badge = document.createElement("span");
   badge.className = "comment-page-count";
@@ -3547,9 +3863,15 @@ function createCommentGroup(pageId, count) {
   return group;
 }
 
+function getCommentGroupTitle(pageId) {
+  return isVideoPageId(pageId) ? getVideoDocumentDisplayName() : t("page", { page: pageId });
+}
+
 function addComment(annotation, container = commentList) {
   const article = document.createElement("article");
   article.className = "comment";
+  const isVideoComment = Number.isFinite(annotation.videoTime);
+  if (isVideoComment) article.classList.add("video-comment");
   article.dataset.annotationId = annotation.id;
   article.tabIndex = 0;
   article.style.setProperty("--annotation-color", getAnnotationColor(annotation));
@@ -3573,7 +3895,12 @@ function addComment(annotation, container = commentList) {
   const time = document.createElement("time");
   time.className = "comment-title-time";
   time.textContent = currentLanguage === "zh" ? "\u521a\u521a" : "Just now";
-  titleMeta.append(titleIntent, time);
+  const publishedAt = formatAnnotationPublishedAt(annotation);
+  time.dateTime = new Date(Number(annotation.createdAt || annotation.updatedAt || Date.now())).toISOString();
+  time.title = publishedAt;
+  title.title = currentLanguage === "zh" ? `\u53d1\u5e03\u65f6\u95f4\uff1a${publishedAt}` : `Published: ${publishedAt}`;
+  titleMeta.append(titleIntent);
+  if (!isVideoComment) titleMeta.append(time);
   const titlePage = document.createElement("span");
   titlePage.className = "comment-title-page";
   titlePage.textContent = getAnnotationLocationLabel(annotation);
@@ -3582,47 +3909,92 @@ function addComment(annotation, container = commentList) {
   const text = document.createElement("p");
   text.textContent = annotation.text || getAnnotationFallbackText(annotation);
 
-  body.append(title, text);
-  if (annotation.type === "mark") {
-    const regionPreview = createCommentRegionPreview(annotation);
-    if (regionPreview) body.append(regionPreview);
+  body.append(title);
+  const isVideoMarkAnnotation = annotation.type === "mark" && Number.isFinite(annotation.videoTime);
+  let regionPreview = null;
+  if (annotation.type === "mark" || isVideoComment) {
+    regionPreview = createCommentRegionPreview(annotation);
   }
+  if (regionPreview || hasReferenceImages(annotation)) body.classList.add("has-comment-media");
+  if (isVideoMarkAnnotation && regionPreview) body.append(regionPreview);
+  body.append(text);
+  if (!isVideoMarkAnnotation && regionPreview) body.append(regionPreview);
   if (hasReferenceImages(annotation)) body.append(createCommentReferences(annotation));
   article.append(body);
   container.append(article);
 }
 
+function formatAnnotationPublishedAt(annotation) {
+  const timestamp = Number(annotation.createdAt || annotation.updatedAt || Date.now());
+  return new Date(timestamp).toLocaleString(currentLanguage === "zh" ? "zh-CN" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function createCommentRegionPreview(annotation) {
-  if (Number.isFinite(annotation.videoTime)) return null;
   const src = createAnnotationRegionImage(annotation);
-  if (!src) return null;
+  const isVideoRegion = Number.isFinite(annotation.videoTime);
+  if (!src && !isVideoRegion) return null;
 
   const button = document.createElement("button");
   button.className = "comment-region-preview";
+  if (!src) button.classList.add("loading");
   button.type = "button";
   button.setAttribute("aria-label", currentLanguage === "zh" ? "\u67e5\u770b\u77e9\u5f62\u533a\u57df\u622a\u56fe" : "View marked region");
+  if (src) button.dataset.previewSrc = src;
 
-  const image = document.createElement("img");
-  image.src = src;
-  image.alt = currentLanguage === "zh" ? "\u77e9\u5f62\u533a\u57df\u622a\u56fe" : "Marked region preview";
+  if (src) {
+    button.append(createCommentRegionPreviewImage(src));
+  } else {
+    const placeholder = document.createElement("span");
+    placeholder.className = "comment-region-preview-placeholder";
+    placeholder.textContent = currentLanguage === "zh" ? "\u751f\u6210\u4e2d" : "Loading";
+    button.append(placeholder);
+    scheduleVideoRegionPreview(annotation.id);
+  }
 
-  button.append(image);
-  button.addEventListener("pointerenter", (event) => queueCommentImagePreview(image.src, event.currentTarget));
+  button.addEventListener("pointerenter", (event) => {
+    const previewSrc = event.currentTarget.dataset.previewSrc;
+    if (previewSrc) queueCommentImagePreview(previewSrc, event.currentTarget);
+  });
   button.addEventListener("pointermove", (event) => positionCommentImagePreview(event.currentTarget));
   button.addEventListener("pointerleave", hideCommentImagePreview);
-  button.addEventListener("focus", (event) => queueCommentImagePreview(image.src, event.currentTarget));
+  button.addEventListener("focus", (event) => {
+    const previewSrc = event.currentTarget.dataset.previewSrc;
+    if (previewSrc) queueCommentImagePreview(previewSrc, event.currentTarget);
+  });
   button.addEventListener("blur", hideCommentImagePreview);
   return button;
 }
 
+function createCommentRegionPreviewImage(src) {
+  const image = document.createElement("img");
+  image.src = src;
+  image.alt = currentLanguage === "zh" ? "\u77e9\u5f62\u533a\u57df\u622a\u56fe" : "Marked region preview";
+  return image;
+}
+
 function createAnnotationRegionImage(annotation) {
-  if (annotation.type !== "mark" || annotation.preview) return "";
+  if (annotation.preview) return "";
+  const isVideoRegion = Number.isFinite(annotation.videoTime);
+  if (!isVideoRegion && annotation.type !== "mark") return "";
+  if (isVideoRegion && annotation.regionImage && annotation.regionImageMode === "video-frame-highlight") return annotation.regionImage;
 
   const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
   const canvas = page?.querySelector("canvas");
-  if (!canvas?.width || !canvas?.height || !annotation.width || !annotation.height) return "";
-  if (Number.isFinite(annotation.videoTime)) drawCurrentVideoFrame();
+  if (!canvas?.width || !canvas?.height) return "";
+  if (isVideoRegion) {
+    if (!isVideoDocumentActive()) return "";
+    const currentTime = currentVideo.video.currentTime || 0;
+    if (Math.abs(currentTime - annotation.videoTime) > 0.08) return "";
+    drawCurrentVideoFrame();
+    return createVideoAnnotationFramePreview(canvas, annotation);
+  }
 
+  if (!annotation.width || !annotation.height) return "";
   const sx = clamp((annotation.x / 100) * canvas.width, 0, canvas.width);
   const sy = clamp((annotation.y / 100) * canvas.height, 0, canvas.height);
   const sw = clamp((annotation.width / 100) * canvas.width, 1, canvas.width - sx);
@@ -3636,6 +4008,140 @@ function createAnnotationRegionImage(annotation) {
   const context = output.getContext("2d");
   context.drawImage(canvas, sx, sy, sw, sh, 0, 0, output.width, output.height);
   return output.toDataURL("image/jpeg", 0.82);
+}
+
+function createVideoAnnotationFramePreview(canvas, annotation) {
+  const maxWidth = 420;
+  const scale = Math.min(1, maxWidth / canvas.width);
+  const output = document.createElement("canvas");
+  output.width = Math.max(1, Math.round(canvas.width * scale));
+  output.height = Math.max(1, Math.round(canvas.height * scale));
+
+  const context = output.getContext("2d");
+  context.drawImage(canvas, 0, 0, output.width, output.height);
+
+  if (annotation.type !== "mark" || !annotation.width || !annotation.height) {
+    return output.toDataURL("image/jpeg", 0.86);
+  }
+
+  context.fillStyle = "rgba(0, 0, 0, 0.58)";
+  context.fillRect(0, 0, output.width, output.height);
+
+  const sx = clamp((annotation.x / 100) * canvas.width, 0, canvas.width);
+  const sy = clamp((annotation.y / 100) * canvas.height, 0, canvas.height);
+  const sw = clamp((annotation.width / 100) * canvas.width, 1, canvas.width - sx);
+  const sh = clamp((annotation.height / 100) * canvas.height, 1, canvas.height - sy);
+  const dx = sx * scale;
+  const dy = sy * scale;
+  const dw = sw * scale;
+  const dh = sh * scale;
+
+  context.drawImage(canvas, sx, sy, sw, sh, dx, dy, dw, dh);
+  context.lineWidth = Math.max(2, Math.round(2 * scale));
+  context.strokeStyle = getAnnotationColor(annotation);
+  context.strokeRect(dx + context.lineWidth / 2, dy + context.lineWidth / 2, Math.max(1, dw - context.lineWidth), Math.max(1, dh - context.lineWidth));
+  return output.toDataURL("image/jpeg", 0.86);
+}
+
+function scheduleVideoRegionPreview(annotationId) {
+  const annotation = annotations.find((item) => item.id === annotationId);
+  if (!annotation || annotation.regionImageMode === "video-frame-highlight" || !Number.isFinite(annotation.videoTime)) return;
+  if (!currentVideo?.url) return;
+  pendingVideoRegionPreviewIds.add(annotationId);
+  if (videoRegionPreviewRunning) return;
+  videoRegionPreviewRunning = true;
+  requestAnimationFrame(processVideoRegionPreviewQueue);
+}
+
+async function processVideoRegionPreviewQueue() {
+  while (pendingVideoRegionPreviewIds.size && isVideoDocumentActive()) {
+    const annotationId = pendingVideoRegionPreviewIds.values().next().value;
+    pendingVideoRegionPreviewIds.delete(annotationId);
+    const annotation = annotations.find((item) => item.id === annotationId);
+    if (!annotation || annotation.regionImageMode === "video-frame-highlight" || !Number.isFinite(annotation.videoTime)) continue;
+
+    const image = await createVideoFramePreviewAtTime(annotation).catch(() => "");
+    if (!image || !isVideoDocumentActive() || !annotations.includes(annotation)) continue;
+    annotation.regionImage = image;
+    annotation.regionImageMode = "video-frame-highlight";
+    saveAnnotations();
+    updateCommentRegionPreviewImage(annotation.id, image);
+  }
+  videoRegionPreviewRunning = false;
+  if (pendingVideoRegionPreviewIds.size) scheduleVideoRegionPreview(pendingVideoRegionPreviewIds.values().next().value);
+}
+
+function createVideoFramePreviewAtTime(annotation) {
+  if (!currentVideo?.url) return Promise.resolve("");
+  const sourceUrl = currentVideo.url;
+  const targetTime = Math.max(0, Number(annotation.videoTime) || 0);
+
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    let settled = false;
+    let timeoutId = 0;
+    const done = (value = "") => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      video.onloadedmetadata = null;
+      video.onseeked = null;
+      video.onerror = null;
+      resolve(value);
+    };
+    const capture = () => {
+      if (!video.videoWidth || !video.videoHeight) {
+        done("");
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+      done(createVideoAnnotationFramePreview(canvas, annotation));
+    };
+    const seek = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : targetTime;
+      video.currentTime = clamp(targetTime, 0, duration || targetTime);
+    };
+
+    video.muted = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    video.onloadedmetadata = seek;
+    video.onseeked = capture;
+    video.onerror = () => done("");
+    timeoutId = window.setTimeout(() => done(""), 1800);
+    video.src = sourceUrl;
+  });
+}
+
+function updateCommentRegionPreviewImage(annotationId, src) {
+  const button = commentList.querySelector(`[data-annotation-id="${annotationId}"] .comment-region-preview`);
+  if (!button) return;
+  button.dataset.previewSrc = src;
+  button.classList.remove("loading");
+  button.replaceChildren(createCommentRegionPreviewImage(src));
+}
+
+function updateAnnotationRegionImage(annotation) {
+  if (annotation.preview) return;
+  const isVideoRegion = Number.isFinite(annotation.videoTime);
+  if (!isVideoRegion && annotation.type !== "mark") return;
+  const previousRegionImage = annotation.regionImage;
+  const previousRegionImageMode = annotation.regionImageMode;
+  if (isVideoRegion) {
+    delete annotation.regionImage;
+    delete annotation.regionImageMode;
+  }
+  const image = createAnnotationRegionImage(annotation);
+  if (image) {
+    annotation.regionImage = image;
+    if (isVideoRegion) annotation.regionImageMode = "video-frame-highlight";
+  } else if (previousRegionImage) {
+    annotation.regionImage = previousRegionImage;
+    if (previousRegionImageMode) annotation.regionImageMode = previousRegionImageMode;
+  }
 }
 
 function scheduleRegionPreviewRefresh(annotationId) {
@@ -3654,11 +4160,13 @@ function refreshCommentRegionPreview(annotationId) {
   const annotation = annotations.find((item) => item.id === annotationId);
   if (!annotation || annotation.draft) return;
 
-  const image = commentList.querySelector(`[data-annotation-id="${annotationId}"] .comment-region-preview img`);
-  if (!image) return;
+  const button = commentList.querySelector(`[data-annotation-id="${annotationId}"] .comment-region-preview`);
+  if (!button) return;
 
+  updateAnnotationRegionImage(annotation);
   const src = createAnnotationRegionImage(annotation);
-  if (src) image.src = src;
+  if (src) updateCommentRegionPreviewImage(annotationId, src);
+  else if (Number.isFinite(annotation.videoTime)) scheduleVideoRegionPreview(annotationId);
 }
 
 function createCommentReferences(annotation) {
@@ -4280,7 +4788,7 @@ function createStaticBoardPreviewCommentGroup(pageId, annotationsForPage) {
   const header = document.createElement("div");
   header.className = "export-html-comment-group-head";
   const label = document.createElement("span");
-  label.textContent = currentLanguage === "zh" ? `\u7b2c ${pageId} \u9875` : `Page ${pageId}`;
+  label.textContent = getCommentGroupTitle(pageId);
   const count = document.createElement("span");
   count.textContent = String(annotationsForPage.length);
   header.append(label, count);
@@ -4512,14 +5020,41 @@ function fitAnnotationPageInViewport(annotationId, options = {}) {
 
 function setLinkedCommentActive(annotationId, active) {
   const comment = commentList.querySelector(`[data-annotation-id="${annotationId}"]`);
-  comment?.classList.toggle("active", active);
+  comment?.classList.toggle("hover-active", active);
 }
 
 function ensureCommentVisible(annotationId) {
+  expandCommentGroupForAnnotation(annotationId);
   const comment = commentList.querySelector(`[data-annotation-id="${annotationId}"]`);
   if (!comment) return;
 
   comment.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+}
+
+function expandCommentGroupForAnnotation(annotationId) {
+  const annotation = annotations.find((item) => item.id === annotationId);
+  if (!annotation) return;
+  const pageId = String(annotation.pageId);
+  const group = commentList.querySelector(`.comment-page-group[data-page-id="${CSS.escape(pageId)}"]`);
+  if (!group?.classList.contains("collapsed")) return;
+  group.classList.remove("collapsed");
+  group.querySelector(".comment-page-header")?.setAttribute("aria-expanded", "true");
+  collapsedCommentGroups.delete(pageId);
+}
+
+function setFocusedComment(annotationId) {
+  focusedCommentToken += 1;
+  focusedCommentId = annotationId;
+  syncFocusedCommentActive();
+  ensureCommentVisible(annotationId);
+}
+
+function syncFocusedCommentActive() {
+  commentList.querySelectorAll(".comment.active").forEach((item) => item.classList.remove("active"));
+  if (!focusedCommentId) return;
+  const comment = commentList.querySelector(`[data-annotation-id="${focusedCommentId}"]`);
+  if (!comment) return;
+  comment.classList.add("active");
 }
 
 function setAnnotationFocusMask(annotationId, active) {
@@ -4570,16 +5105,15 @@ function createAnnotationFocusMask(annotation) {
 
 function highlightAnnotation(annotationId) {
   pageStack.querySelectorAll(".annotation-ui.focused").forEach((item) => item.classList.remove("focused"));
-  commentList.querySelectorAll(".comment.active").forEach((item) => item.classList.remove("active"));
 
   const target = pageStack.querySelector(`[data-annotation-id="${annotationId}"]`);
-  const comment = commentList.querySelector(`[data-annotation-id="${annotationId}"]`);
   target?.classList.add("focused");
-  comment?.classList.add("active");
+  setFocusedComment(annotationId);
+  const token = focusedCommentToken;
 
   setTimeout(() => {
     target?.classList.remove("focused");
-    comment?.classList.remove("active");
+    if (token === focusedCommentToken) syncFocusedCommentActive();
   }, 1000);
 }
 
@@ -4780,6 +5314,7 @@ function renderVideo(file) {
       const { page, canvas } = createPage(1, width, height);
       page.classList.add("video-page");
       page.dataset.mediaType = "video";
+      updateVideoPageBadge(page);
       page.style.aspectRatio = "auto";
       page.style.minHeight = "0";
       const stage = createVideoStage(page, width, height);
@@ -4790,7 +5325,8 @@ function renderVideo(file) {
       stage.insertBefore(createVideoAnnotationHitbox(), stage.querySelector(".annotation-layer"));
       const controls = createVideoControls(video);
       page.append(controls.root);
-      currentVideo = { video, canvas, controls, url, waveform: null };
+      currentVideo = { video, canvas, controls, url, waveform: null, name: file.name };
+      updateVideoPageBadge(page);
       bindVideoHoverShortcuts(page);
       setFileMetaText(`${formatBytes(file.size)} \u00b7 MP4 \u00b7 ${formatVideoTime(video.duration || 0)} \u00b7 \u672c\u5730\u9884\u89c8`);
       bindVideoFrameSync(video);
@@ -4852,6 +5388,24 @@ function createVideoControls(video) {
   root.className = "video-controls";
   root.addEventListener("pointerdown", (event) => event.stopPropagation());
 
+  const quickComment = document.createElement("form");
+  quickComment.className = "video-quick-comment";
+  const quickCommentInput = document.createElement("input");
+  quickCommentInput.className = "video-quick-comment-input";
+  quickCommentInput.type = "text";
+  quickCommentInput.placeholder = t("videoQuickCommentPlaceholder");
+  quickCommentInput.setAttribute("aria-label", t("videoQuickCommentPlaceholder"));
+  const quickCommentButton = document.createElement("button");
+  quickCommentButton.className = "video-quick-comment-button";
+  quickCommentButton.type = "submit";
+  quickCommentButton.textContent = t("addVideoComment");
+  quickComment.append(quickCommentInput, quickCommentButton);
+  quickComment.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addCurrentFrameVideoComment(quickCommentInput.value);
+    quickCommentInput.value = "";
+  });
+
   const playButton = document.createElement("button");
   playButton.className = "video-control-button video-play-button";
   playButton.type = "button";
@@ -4873,9 +5427,37 @@ function createVideoControls(video) {
   muteButton.className = "video-control-button video-mute-button";
   muteButton.type = "button";
   muteButton.addEventListener("click", () => {
-    video.muted = !video.muted;
+    if (video.muted || video.volume === 0) {
+      if (video.volume === 0) video.volume = 1;
+      video.muted = false;
+    } else {
+      video.muted = true;
+    }
     updateVideoControls();
   });
+  const volumeControl = document.createElement("div");
+  volumeControl.className = "video-volume-control";
+  const volumePanel = document.createElement("div");
+  volumePanel.className = "video-volume-panel";
+  const volumeSlider = document.createElement("input");
+  volumeSlider.className = "video-volume-slider";
+  volumeSlider.type = "range";
+  volumeSlider.min = "0";
+  volumeSlider.max = "100";
+  volumeSlider.step = "1";
+  volumeSlider.value = "100";
+  volumeSlider.setAttribute("aria-label", currentLanguage === "zh" ? "\u97f3\u91cf" : "Volume");
+  const volumeValue = document.createElement("span");
+  volumeValue.className = "video-volume-value";
+  volumeValue.textContent = "100";
+  volumeSlider.addEventListener("input", () => {
+    const nextVolume = clamp(Number(volumeSlider.value) / 100, 0, 1);
+    video.volume = nextVolume;
+    video.muted = nextVolume === 0;
+    updateVideoControls();
+  });
+  volumePanel.append(volumeSlider, volumeValue);
+  volumeControl.append(muteButton, volumePanel);
 
   const current = document.createElement("span");
   current.className = "video-time video-time-current";
@@ -4898,6 +5480,44 @@ function createVideoControls(video) {
     updateVideoControls();
   });
 
+  const timelineZoomControl = document.createElement("label");
+  timelineZoomControl.className = "video-timeline-zoom-control";
+  const timelineZoomSlider = document.createElement("input");
+  timelineZoomSlider.className = "video-timeline-zoom";
+  timelineZoomSlider.type = "range";
+  timelineZoomSlider.min = "1";
+  timelineZoomSlider.max = "6";
+  timelineZoomSlider.step = "0.25";
+  timelineZoomSlider.value = String(videoTimelineZoom);
+  timelineZoomSlider.setAttribute("aria-label", currentLanguage === "zh" ? "\u65f6\u95f4\u8f74\u7f29\u653e" : "Timeline zoom");
+  const timelineZoomValue = document.createElement("span");
+  timelineZoomValue.className = "video-timeline-zoom-value";
+  timelineZoomValue.textContent = formatTimelineZoomValue(videoTimelineZoom);
+  timelineZoomSlider.addEventListener("input", () => {
+    videoTimelineZoom = clamp(Number(timelineZoomSlider.value) || 1, 1, 6);
+    updateVideoTimelineZoom(true);
+    showVideoTimelineZoomValue();
+  });
+  timelineZoomSlider.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    const nextZoom = clamp(videoTimelineZoom + direction * 0.25, 1, 6);
+    videoTimelineZoom = nextZoom;
+    timelineZoomSlider.value = String(nextZoom);
+    updateVideoTimelineZoom(true);
+    showVideoTimelineZoomValue();
+  }, { passive: false });
+  timelineZoomSlider.addEventListener("pointerdown", showVideoTimelineZoomValue);
+  timelineZoomSlider.addEventListener("pointerup", () => hideVideoTimelineZoomValue(700));
+  timelineZoomSlider.addEventListener("pointercancel", () => hideVideoTimelineZoomValue(300));
+  timelineZoomSlider.addEventListener("focus", showVideoTimelineZoomValue);
+  timelineZoomSlider.addEventListener("blur", () => hideVideoTimelineZoomValue(120));
+  timelineZoomControl.append(timelineZoomSlider, timelineZoomValue);
+
+  const timelineScroller = document.createElement("div");
+  timelineScroller.className = "video-timeline-scroller";
+  const timelineContent = document.createElement("div");
+  timelineContent.className = "video-timeline-content";
   const timelineWrap = document.createElement("div");
   timelineWrap.className = "video-timeline-wrap";
   const timeline = document.createElement("input");
@@ -4919,12 +5539,15 @@ function createVideoControls(video) {
   const markerTrack = document.createElement("div");
   markerTrack.className = "video-marker-track";
   timelineWrap.append(timeline, markerTrack);
+  timelineContent.append(timelineWrap);
+  timelineScroller.append(timelineContent);
 
   const waveform = document.createElement("canvas");
   waveform.className = "video-waveform";
   waveform.width = 900;
   waveform.height = 54;
   waveform.setAttribute("aria-label", currentLanguage === "zh" ? "\u97f3\u9891\u6ce2\u5f62" : "Audio waveform");
+  timelineContent.append(waveform);
 
   const top = document.createElement("div");
   top.className = "video-control-top";
@@ -4936,15 +5559,25 @@ function createVideoControls(video) {
   transport.append(previousAnnotationButton, playButton, nextAnnotationButton);
   const optionGroup = document.createElement("div");
   optionGroup.className = "video-option-group";
-  optionGroup.append(speedSelect, muteButton);
+  optionGroup.append(timelineZoomControl, speedSelect, volumeControl);
   top.append(timeGroup, transport, optionGroup);
-  root.append(top, timelineWrap, waveform);
+  root.append(quickComment, top, timelineScroller);
   return {
     root,
+    quickCommentInput,
+    quickCommentButton,
     playButton,
     previousAnnotationButton,
     nextAnnotationButton,
     muteButton,
+    volumeControl,
+    volumeSlider,
+    volumeValue,
+    timelineZoomControl,
+    timelineZoomSlider,
+    timelineZoomValue,
+    timelineScroller,
+    timelineContent,
     speedSelect,
     timeline,
     markerTrack,
@@ -4977,6 +5610,7 @@ function scheduleVideoAnnotationRender() {
     drawCurrentVideoFrame();
     renderAnnotations();
     updateVideoControls();
+    if (!currentVideo?.video?.paused) scrollVideoTimelineToPlayhead();
   });
 }
 
@@ -5005,15 +5639,76 @@ function updateVideoControls() {
     ? (currentLanguage === "zh" ? "\u53d6\u6d88\u9759\u97f3" : "Unmute")
     : (currentLanguage === "zh" ? "\u9759\u97f3" : "Mute");
   controls.muteButton.setAttribute("aria-label", controls.muteButton.title);
+  const volumePercent = Math.round(clamp(video.volume, 0, 1) * 100);
+  if (controls.volumeSlider && controls.volumeSlider.value !== String(volumePercent)) {
+    controls.volumeSlider.value = String(volumePercent);
+  }
+  if (controls.volumeValue) controls.volumeValue.textContent = String(volumePercent);
+  controls.root.classList.toggle("waveform-hidden", video.muted || video.volume === 0);
   controls.speedSelect.value = String(video.playbackRate || 1);
+  if (controls.timelineZoomSlider && controls.timelineZoomSlider.value !== String(videoTimelineZoom)) {
+    controls.timelineZoomSlider.value = String(videoTimelineZoom);
+  }
+  if (controls.timelineZoomValue) controls.timelineZoomValue.textContent = formatTimelineZoomValue(videoTimelineZoom);
   controls.current.textContent = formatVideoTime(currentTime);
   controls.duration.textContent = formatVideoTime(duration);
   controls.timeline.value = duration ? String(Math.round((currentTime / duration) * 1000)) : "0";
   controls.timeline.disabled = !duration;
+  updateVideoTimelineZoom();
   updateVideoAnnotationNavButtons();
   renderVideoTimelineMarkers();
+  syncVideoPlaybackActiveAnnotation();
   drawVideoWaveformProgress();
   if (iconChanged || muteIconChanged) renderLucideIcons();
+}
+
+function updateVideoTimelineZoom(keepPlayheadVisible = false) {
+  const controls = currentVideo?.controls;
+  if (!controls?.timelineContent) return;
+  const zoom = clamp(videoTimelineZoom || 1, 1, 6);
+  controls.timelineContent.style.setProperty("--timeline-zoom", String(zoom));
+  requestAnimationFrame(() => {
+    drawVideoWaveformProgress();
+    if (keepPlayheadVisible) scrollVideoTimelineToPlayhead();
+  });
+}
+
+function formatTimelineZoomValue(value) {
+  const zoom = clamp(Number(value) || 1, 1, 6);
+  return `${Number.isInteger(zoom) ? String(zoom) : zoom.toFixed(2).replace(/0$/, "")}x`;
+}
+
+function showVideoTimelineZoomValue() {
+  const controls = currentVideo?.controls;
+  if (!controls?.timelineZoomControl || !controls.timelineZoomValue) return;
+  window.clearTimeout(videoTimelineZoomValueTimer);
+  controls.timelineZoomValue.textContent = formatTimelineZoomValue(videoTimelineZoom);
+  controls.timelineZoomControl.classList.add("show-value");
+}
+
+function hideVideoTimelineZoomValue(delay = 600) {
+  const controls = currentVideo?.controls;
+  window.clearTimeout(videoTimelineZoomValueTimer);
+  videoTimelineZoomValueTimer = window.setTimeout(() => {
+    controls?.timelineZoomControl?.classList.remove("show-value");
+  }, delay);
+}
+
+function scrollVideoTimelineToPlayhead() {
+  const { video, controls } = currentVideo || {};
+  if (!video || !controls?.timelineScroller || !controls.timelineContent) return;
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  if (!duration) return;
+  const progress = clamp((video.currentTime || 0) / duration, 0, 1);
+  const scroller = controls.timelineScroller;
+  const contentWidth = controls.timelineContent.scrollWidth || controls.timelineContent.offsetWidth;
+  const playheadX = progress * contentWidth;
+  const padding = Math.min(120, scroller.clientWidth * 0.28);
+  if (playheadX < scroller.scrollLeft + padding) {
+    scroller.scrollLeft = Math.max(0, playheadX - padding);
+  } else if (playheadX > scroller.scrollLeft + scroller.clientWidth - padding) {
+    scroller.scrollLeft = Math.max(0, playheadX - scroller.clientWidth + padding);
+  }
 }
 
 function updateVideoAnnotationNavButtons() {
@@ -5034,10 +5729,11 @@ function syncVideoAnnotationNavButton(button, annotation, direction) {
   button.setAttribute("aria-label", button.title);
 }
 
-function navigateVideoAnnotation(direction) {
+async function navigateVideoAnnotation(direction) {
   const annotation = findVideoAnnotationByDirection(direction);
   if (!annotation) return;
-  focusAnnotationFromComment(annotation.id);
+  await focusAnnotationFromComment(annotation.id);
+  setFocusedComment(annotation.id);
 }
 
 function findVideoAnnotationByDirection(direction) {
@@ -5061,6 +5757,7 @@ function renderVideoTimelineMarkers() {
   if (!currentVideo?.controls?.markerTrack || !isVideoDocumentActive()) return;
   const { video, controls } = currentVideo;
   const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  const activeAnnotation = getCurrentVideoPlaybackAnnotation();
   controls.markerTrack.replaceChildren();
   if (!duration) return;
 
@@ -5069,6 +5766,7 @@ function renderVideoTimelineMarkers() {
     .forEach((annotation) => {
       const marker = document.createElement("button");
       marker.className = "video-timeline-marker";
+      marker.classList.toggle("playback-active", annotation.id === activeAnnotation?.id);
       marker.type = "button";
       marker.dataset.annotationId = annotation.id;
       marker.style.left = `${clamp((annotation.videoTime / duration) * 100, 0, 100)}%`;
@@ -5080,8 +5778,47 @@ function renderVideoTimelineMarkers() {
         event.stopPropagation();
         focusAnnotationFromComment(annotation.id);
       });
+      marker.addEventListener("mouseenter", () => {
+        setLinkedCommentActive(annotation.id, true);
+        ensureCommentVisible(annotation.id);
+      });
+      marker.addEventListener("mouseleave", () => setLinkedCommentActive(annotation.id, false));
+      marker.addEventListener("focus", () => {
+        setLinkedCommentActive(annotation.id, true);
+        ensureCommentVisible(annotation.id);
+      });
+      marker.addEventListener("blur", () => setLinkedCommentActive(annotation.id, false));
       controls.markerTrack.append(marker);
     });
+}
+
+function getCurrentVideoPlaybackAnnotation(tolerance = 0.45) {
+  if (!isVideoDocumentActive()) return null;
+  const currentTime = currentVideo.video.currentTime || 0;
+  return getVideoTimelineAnnotations().reduce((closest, annotation) => {
+    const distance = Math.abs(annotation.videoTime - currentTime);
+    if (distance > tolerance) return closest;
+    if (!closest || distance < closest.distance) return { annotation, distance };
+    return closest;
+  }, null)?.annotation || null;
+}
+
+function syncVideoPlaybackActiveAnnotation() {
+  commentList.querySelectorAll(".comment.playback-active").forEach((item) => item.classList.remove("playback-active"));
+  currentVideo?.controls?.markerTrack?.querySelectorAll(".video-timeline-marker.playback-active").forEach((item) => item.classList.remove("playback-active"));
+
+  const annotation = getCurrentVideoPlaybackAnnotation();
+  if (!annotation) {
+    videoPlaybackActiveAnnotationId = null;
+    return;
+  }
+
+  commentList.querySelector(`[data-annotation-id="${annotation.id}"]`)?.classList.add("playback-active");
+  currentVideo?.controls?.markerTrack?.querySelector(`[data-annotation-id="${annotation.id}"]`)?.classList.add("playback-active");
+  if (videoPlaybackActiveAnnotationId !== annotation.id) {
+    videoPlaybackActiveAnnotationId = annotation.id;
+    ensureCommentVisible(annotation.id);
+  }
 }
 
 function getVideoTimelineAnnotations() {
@@ -5121,7 +5858,8 @@ async function buildVideoWaveform(file) {
     if (!AudioContextClass) return;
     const audioContext = new AudioContextClass();
     const audioBuffer = await audioContext.decodeAudioData(buffer.slice(0));
-    const peaks = getAudioPeaks(audioBuffer, 180);
+    const videoDuration = Number.isFinite(targetVideo.duration) ? targetVideo.duration : audioBuffer.duration;
+    const peaks = getAudioPeaks(audioBuffer, 240, videoDuration);
     await audioContext.close?.();
     if (currentVideo?.video !== targetVideo) return;
     currentVideo.waveform = peaks;
@@ -5131,12 +5869,13 @@ async function buildVideoWaveform(file) {
   }
 }
 
-function getAudioPeaks(audioBuffer, count) {
+function getAudioPeaks(audioBuffer, count, targetDuration = audioBuffer.duration) {
   const channel = audioBuffer.getChannelData(0);
-  const blockSize = Math.max(1, Math.floor(channel.length / count));
+  const sampleRate = audioBuffer.sampleRate || 44100;
+  const safeDuration = Math.max(0.001, Number(targetDuration) || audioBuffer.duration || 0.001);
   return Array.from({ length: count }, (_, index) => {
-    const start = index * blockSize;
-    const end = Math.min(channel.length, start + blockSize);
+    const start = Math.floor((index / count) * safeDuration * sampleRate);
+    const end = Math.min(channel.length, Math.floor(((index + 1) / count) * safeDuration * sampleRate));
     let max = 0;
     for (let i = start; i < end; i += 1) {
       const value = Math.abs(channel[i] || 0);
@@ -5161,31 +5900,100 @@ function drawVideoWaveform(peaks = currentVideo?.waveform || []) {
   context.fillStyle = getCanvasCssColor("--panel-2", "#111827");
   context.fillRect(0, 0, width, height);
 
-  const bars = peaks.length ? peaks : Array.from({ length: 96 }, (_, index) => 0.08 + Math.sin(index * 0.65) * 0.025);
-  const gap = Math.max(1, Math.round(2 * dpr));
-  const barWidth = Math.max(1, Math.floor((width - gap * (bars.length - 1)) / bars.length));
+  const samples = peaks.length ? peaks : Array.from({ length: 96 }, (_, index) => 0.08 + Math.sin(index * 0.65) * 0.025);
+  const inset = Math.round(9 * dpr);
+  const drawableWidth = Math.max(1, width - inset * 2);
   const center = height / 2;
-  context.fillStyle = getCanvasCssColor("--accent-2", "#00c2a8");
-  bars.forEach((peak, index) => {
-    const normalized = clamp(Number(peak) || 0, 0, 1);
-    const barHeight = Math.max(2 * dpr, normalized * height * 0.82);
-    const x = index * (barWidth + gap);
-    context.fillRect(x, center - barHeight / 2, barWidth, barHeight);
+  const topPadding = Math.round(7 * dpr);
+  const waveHeight = Math.max(2, center - topPadding);
+  const video = currentVideo?.video;
+  const duration = Number.isFinite(video?.duration) ? video.duration : 0;
+  const progress = duration ? clamp((video.currentTime || 0) / duration, 0, 1) : 0;
+  const progressX = inset + drawableWidth * progress;
+  const volumeLevel = video?.muted ? 0 : clamp(video?.volume ?? 1, 0, 1);
+  const volumeScale = 0.22 + volumeLevel * 0.78;
+  const playedColor = getCanvasCssColor("--accent-2", "#00c2a8");
+  const pendingColor = "rgba(136, 142, 155, 0.42)";
+  const centerColor = "rgba(255, 255, 255, 0.12)";
+
+  context.fillStyle = centerColor;
+  context.fillRect(inset, Math.round(center), drawableWidth, Math.max(1, dpr));
+
+  drawPremiereWaveformShape(context, samples, {
+    x: inset,
+    y: center,
+    width: drawableWidth,
+    height: waveHeight,
+    volumeScale,
+    color: pendingColor,
+    alpha: 1,
   });
-  drawVideoWaveformProgressLine(context, width, height);
+
+  context.save();
+  context.beginPath();
+  context.rect(inset, 0, Math.max(0, progressX - inset), height);
+  context.clip();
+  drawPremiereWaveformShape(context, samples, {
+    x: inset,
+    y: center,
+    width: drawableWidth,
+    height: waveHeight,
+    volumeScale,
+    color: playedColor,
+    alpha: 0.95,
+  });
+  context.restore();
+  context.globalAlpha = 1;
+  drawVideoWaveformProgressLine(context, width, height, inset, drawableWidth);
+}
+
+function drawPremiereWaveformShape(context, samples, options) {
+  const { x, y, width, height, volumeScale, color, alpha } = options;
+  const columnCount = Math.max(1, Math.floor(width));
+  const values = Array.from({ length: columnCount }, (_, index) => {
+    const source = (index / Math.max(1, columnCount - 1)) * Math.max(0, samples.length - 1);
+    const left = Math.floor(source);
+    const right = Math.min(samples.length - 1, left + 1);
+    const mix = source - left;
+    const value = (Number(samples[left]) || 0) * (1 - mix) + (Number(samples[right]) || 0) * mix;
+    return clamp(value, 0, 1);
+  });
+
+  context.save();
+  context.globalAlpha = alpha;
+  context.fillStyle = color;
+  context.beginPath();
+  context.moveTo(x, y);
+  values.forEach((value, index) => {
+    const previous = values[Math.max(0, index - 1)];
+    const next = values[Math.min(values.length - 1, index + 1)];
+    const smoothed = (previous + value * 2 + next) / 4;
+    const amplitude = Math.max(1, smoothed * volumeScale * height);
+    context.lineTo(x + index, y - amplitude);
+  });
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const previous = values[Math.max(0, index - 1)];
+    const next = values[Math.min(values.length - 1, index + 1)];
+    const smoothed = (previous + values[index] * 2 + next) / 4;
+    const amplitude = Math.max(1, smoothed * volumeScale * height);
+    context.lineTo(x + index, y + amplitude);
+  }
+  context.closePath();
+  context.fill();
+  context.restore();
 }
 
 function drawVideoWaveformProgress() {
   drawVideoWaveform(currentVideo?.waveform || []);
 }
 
-function drawVideoWaveformProgressLine(context, width, height) {
+function drawVideoWaveformProgressLine(context, width, height, inset = 0, drawableWidth = width) {
   const canvas = currentVideo?.controls?.waveform;
   const video = currentVideo?.video;
   if (!canvas || !video) return;
   const duration = Number.isFinite(video.duration) ? video.duration : 0;
   const progress = duration ? clamp((video.currentTime || 0) / duration, 0, 1) : 0;
-  const x = Math.round(width * progress);
+  const x = Math.round(inset + drawableWidth * progress);
   context.fillStyle = "rgba(255, 255, 255, 0.88)";
   context.fillRect(Math.max(0, x - 1), 0, 2, height);
 }
@@ -5208,6 +6016,10 @@ function cleanupCurrentVideo() {
     cancelAnimationFrame(videoRenderFrame);
     videoRenderFrame = null;
   }
+  cancelPendingVideoClick();
+  videoBlankPointer = null;
+  pendingVideoRegionPreviewIds.clear();
+  videoRegionPreviewRunning = false;
   videoHoverActive = false;
   if (currentVideo?.url) URL.revokeObjectURL(currentVideo.url);
   currentVideo = null;
@@ -5723,6 +6535,7 @@ function renameDocumentByKey(key) {
         docTitle.textContent = t("appTitle");
         fileName.textContent = nextName;
         statusFileName.textContent = nextName;
+        updateVideoPageBadge();
       }
     },
   });
