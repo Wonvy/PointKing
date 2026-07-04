@@ -263,6 +263,7 @@ let annotationNoticeTimer = null;
 let placeholderPasteFeedbackTimer = null;
 let lastPointAnnotationTriggerAt = 0;
 let lastCanvasPointClick = null;
+let lastMobileBlankTap = null;
 let magnifierEnabled = false;
 let magnifierTimer = null;
 let magnifierActive = false;
@@ -271,11 +272,14 @@ let magnifierPointerId = null;
 let magnifierPage = null;
 let magnifierLastClient = null;
 let magnifierScale = getStoredMagnifierScale();
+let magnifierAutoEnabledForMobile = false;
 let commentSearchQuery = "";
 let commentFilterIntent = "all";
 let commentImagePreviewTimer = null;
 let mobilePanelsInitialized = false;
 let mobileAnnotationDock = null;
+let mobileStableViewportHeight = 0;
+let mobileViewportSyncTimer = null;
 let creatingBlankDocument = false;
 const pendingRegionPreviewIds = new Set();
 const collapsedCommentGroups = new Set();
@@ -301,6 +305,7 @@ syncMobileViewportGeometry();
 setCurrentTool(currentTool);
 syncDetailToggleState();
 activateMobileAnnotationTool();
+syncMagnifierDefaultForLayout();
 
 languageBtn.addEventListener("click", () => {
   currentLanguage = currentLanguage === "zh" ? "en" : "zh";
@@ -471,6 +476,12 @@ canvasViewport.addEventListener("pointerdown", (event) => {
   const page = event.target.closest(".doc-page");
   activePointer = event.pointerId;
 
+  if (handleMobileBlankDoubleTap(event, page)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
   if (spacePanActive || !page || isMiddleButton || event.altKey || event.shiftKey) {
     event.preventDefault();
     beginPan(event);
@@ -480,20 +491,21 @@ canvasViewport.addEventListener("pointerdown", (event) => {
   startMagnifierHold(event, page);
 
   if (hasOpenAnnotationEditor()) {
-    if (!isMobileLayout()) {
+    if (isMobileLayout()) {
       event.preventDefault();
       event.stopPropagation();
-      const annotationId = getCurrentEditorAnnotationId();
-      if (annotationId) cancelAnnotation(annotationId);
+      closeMobileAnnotationEditorFromCanvas();
       dragStart = null;
       dragEndPoint = null;
       dragPreview = null;
       return;
     }
 
-    if (currentTool === "mark" && moveEmptyDraftAnnotationToPointer(event, page)) {
+    if (!isMobileLayout()) {
       event.preventDefault();
       event.stopPropagation();
+      const annotationId = getCurrentEditorAnnotationId();
+      if (annotationId) cancelAnnotation(annotationId);
       dragStart = null;
       dragEndPoint = null;
       dragPreview = null;
@@ -590,6 +602,10 @@ canvasViewport.addEventListener("pointerup", (event) => {
   activeCanvasPointers.delete(event.pointerId);
   if (pinchState) {
     endPinchZoom();
+    if (dragPreview?.preview) {
+      const targetPage = pageStack.querySelector(`.doc-page[data-page-id="${dragPreview.pageId}"]`);
+      if (targetPage) updateDragPreviewFromPoint(dragEndPoint || dragStart);
+    }
     return;
   }
 
@@ -647,7 +663,10 @@ canvasViewport.addEventListener("pointercancel", (event) => {
     canvasViewport.releasePointerCapture(event.pointerId);
   }
   activeCanvasPointers.delete(event.pointerId);
-  if (pinchState) endPinchZoom();
+  if (pinchState) {
+    endPinchZoom();
+    if (dragPreview?.preview) return;
+  }
   if (event.pointerId === magnifierPointerId) stopMagnifier();
   dragStart = null;
   dragEndPoint = null;
@@ -664,9 +683,9 @@ canvasViewport.addEventListener("dblclick", (event) => {
     return;
   }
 
-  if (!isMobileLayout() || event.target.closest(".doc-page, .annotation-editor")) return;
+  if (event.target.closest(".doc-page, .annotation-editor, .annotation-ui")) return;
   event.preventDefault();
-  resetCanvasView();
+  moveBoardIntoView();
 });
 
 canvasViewport.addEventListener("click", (event) => {
@@ -750,6 +769,7 @@ window.addEventListener("resize", () => {
   applyCanvasTransform();
   syncMobilePanelState();
   syncMobileViewportGeometry();
+  syncMagnifierDefaultForLayout();
   if (hasOpenAnnotationEditor()) renderAnnotations();
 });
 
@@ -758,6 +778,15 @@ window.addEventListener("pageshow", () => {
 });
 
 window.visualViewport?.addEventListener("resize", syncMobileViewportGeometry);
+window.visualViewport?.addEventListener("scroll", syncMobileViewportGeometry);
+document.addEventListener("focusin", (event) => {
+  if (!isMobileKeyboardTarget(event.target)) return;
+  scheduleMobileViewportSync();
+});
+document.addEventListener("focusout", (event) => {
+  if (!isMobileKeyboardTarget(event.target)) return;
+  scheduleMobileViewportSync();
+}, true);
 
 function t(key, values = {}) {
   const value = translations[currentLanguage]?.[key] || translations.en[key] || key;
@@ -847,8 +876,23 @@ function activateMobileAnnotationTool() {
   if (isMobileLayout()) setCurrentTool("mark");
 }
 
-function setMagnifierEnabled(enabled) {
+function syncMagnifierDefaultForLayout() {
+  if (isMobileLayout()) {
+    if (!magnifierEnabled) {
+      setMagnifierEnabled(true, { auto: true });
+    }
+    return;
+  }
+
+  if (magnifierAutoEnabledForMobile) {
+    setMagnifierEnabled(false, { auto: true });
+  }
+}
+
+function setMagnifierEnabled(enabled, options = {}) {
+  const { auto = false } = options;
   magnifierEnabled = enabled;
+  magnifierAutoEnabledForMobile = auto ? enabled : false;
   magnifierBtn.classList.toggle("active", enabled);
   magnifierBtn.setAttribute("aria-pressed", String(enabled));
   if (!enabled) stopMagnifier();
@@ -917,16 +961,27 @@ function updateMagnifier(event) {
   const sx = xRatio * source.width;
   const sy = yRatio * source.height;
   const sample = Math.max(18, lensCanvas.width / magnifierScale);
-  const sw = Math.min(sample, source.width);
-  const sh = Math.min(sample, source.height);
-  const sourceX = clamp(sx - sw / 2, 0, source.width - sw);
-  const sourceY = clamp(sy - sh / 2, 0, source.height - sh);
+  const desiredSourceX = sx - sample / 2;
+  const desiredSourceY = sy - sample / 2;
+  const sourceX = clamp(desiredSourceX, 0, source.width);
+  const sourceY = clamp(desiredSourceY, 0, source.height);
+  const sourceRight = clamp(desiredSourceX + sample, 0, source.width);
+  const sourceBottom = clamp(desiredSourceY + sample, 0, source.height);
+  const sw = Math.max(0, sourceRight - sourceX);
+  const sh = Math.max(0, sourceBottom - sourceY);
+  const scale = lensCanvas.width / sample;
+  const destX = (sourceX - desiredSourceX) * scale;
+  const destY = (sourceY - desiredSourceY) * scale;
+  const destWidth = sw * scale;
+  const destHeight = sh * scale;
 
   const context = lensCanvas.getContext("2d");
   context.clearRect(0, 0, lensCanvas.width, lensCanvas.height);
+  context.fillStyle = getComputedStyle(magnifierLens).backgroundColor || "#101116";
+  context.fillRect(0, 0, lensCanvas.width, lensCanvas.height);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  context.drawImage(source, sourceX, sourceY, sw, sh, 0, 0, lensCanvas.width, lensCanvas.height);
+  if (sw > 0 && sh > 0) context.drawImage(source, sourceX, sourceY, sw, sh, destX, destY, destWidth, destHeight);
 
   const size = 180;
   magnifierLens.style.left = `${Math.min(window.innerWidth - size - 12, event.clientX + 18)}px`;
@@ -1169,6 +1224,19 @@ function focusCurrentAnnotationEditor() {
   if (annotationId) focusAnnotationInput(annotationId);
 }
 
+function closeMobileAnnotationEditorFromCanvas() {
+  const annotationId = getCurrentEditorAnnotationId();
+  if (!annotationId) return;
+
+  const editor = getAnnotationEditor(annotationId);
+  const input = editor?.querySelector("textarea");
+  const activeTab = editor?.querySelector(".annotation-tab.active");
+  const intent = activeTab?.dataset.editorMode || "suggestion";
+  const value = input?.value || "";
+
+  commitAnnotation(annotationId, value, intent);
+}
+
 function moveEmptyDraftAnnotationToPointer(event, page) {
   const annotation = annotations.find((item) => item.draft);
   if (!annotation || !isDraftEditorEmpty(annotation.id)) return false;
@@ -1344,7 +1412,7 @@ function endPan(event) {
 }
 
 function beginPinchZoom() {
-  cancelTransientCanvasAction();
+  if (!dragPreview?.preview) cancelTransientCanvasAction();
   stopMagnifier();
   if (isPanning) {
     isPanning = false;
@@ -1419,6 +1487,32 @@ function cancelTransientCanvasAction() {
   dragPreview = null;
 }
 
+function handleMobileBlankDoubleTap(event, page) {
+  if (!isMobileLayout() || page || event.button > 0 || event.target.closest(".annotation-editor, .annotation-ui")) {
+    lastMobileBlankTap = null;
+    return false;
+  }
+
+  const now = Date.now();
+  const previous = lastMobileBlankTap;
+  lastMobileBlankTap = {
+    time: now,
+    x: event.clientX,
+    y: event.clientY,
+  };
+
+  if (!previous) return false;
+
+  const elapsed = now - previous.time;
+  const distance = Math.hypot(event.clientX - previous.x, event.clientY - previous.y);
+  if (elapsed > 700 || distance > 44) return false;
+
+  lastMobileBlankTap = null;
+  cancelTransientCanvasAction();
+  moveBoardIntoView();
+  return true;
+}
+
 function centerCanvas() {
   updateSurfaceBounds();
   const viewport = canvasViewport.getBoundingClientRect();
@@ -1435,6 +1529,23 @@ function resetCanvasView() {
   updateSurfaceBounds();
   zoom = isMobileLayout() ? getMobileDefaultZoom() : 1;
   centerCanvas();
+}
+
+function moveBoardIntoView() {
+  if (!pageStack.querySelector(".doc-page")) return false;
+
+  updateSurfaceBounds();
+  const viewport = canvasViewport.getBoundingClientRect();
+  const stackWidth = pageStack.offsetWidth;
+  const stackHeight = pageStack.scrollHeight || pageStack.offsetHeight;
+  if (!viewport.width || !stackWidth || !stackHeight) return false;
+
+  const stackCenterX = pageStack.offsetLeft + stackWidth / 2;
+  const topPadding = isMobileLayout() ? 16 : 34;
+  pan.x = viewport.width / 2 - stackCenterX * zoom;
+  pan.y = topPadding - pageStack.offsetTop * zoom;
+  applyCanvasTransform();
+  return true;
 }
 
 function getMobileDefaultZoom() {
@@ -1679,6 +1790,7 @@ function getExportMenu() {
 
 function toggleExportMenu() {
   const menu = getExportMenu();
+  const menuWidth = 146;
   const open = !menu.classList.contains("open");
   if (!open) {
     hideExportMenu();
@@ -1691,7 +1803,7 @@ function toggleExportMenu() {
   );
   const rect = shareBtn.getBoundingClientRect();
   menu.style.top = `${rect.bottom + 8}px`;
-  menu.style.left = `${Math.max(8, rect.right - 176)}px`;
+  menu.style.left = `${Math.max(8, rect.right - menuWidth)}px`;
   menu.classList.add("open");
   shareBtn.setAttribute("aria-expanded", "true");
   renderLucideIcons();
@@ -1731,6 +1843,14 @@ function getPagePoint(event, page) {
   return {
     x: ((event.clientX - rect.left) / rect.width) * 100,
     y: ((event.clientY - rect.top) / rect.height) * 100,
+  };
+}
+
+function getPageClientPoint(page, point) {
+  const rect = page.getBoundingClientRect();
+  return {
+    clientX: rect.left + (point.x / 100) * rect.width,
+    clientY: rect.top + (point.y / 100) * rect.height,
   };
 }
 
@@ -2030,11 +2150,7 @@ function updateMagnifierForPagePoint(point) {
   const page = pageStack.querySelector(`.doc-page[data-page-id="${dragPreview.pageId}"]`);
   if (!page) return;
 
-  const rect = page.getBoundingClientRect();
-  const clientPoint = {
-    clientX: rect.left + (point.x / 100) * rect.width,
-    clientY: rect.top + (point.y / 100) * rect.height,
-  };
+  const clientPoint = getPageClientPoint(page, point);
   magnifierLastClient = clientPoint;
   updateMagnifier(clientPoint);
 }
@@ -2065,14 +2181,15 @@ function createAnnotationArrow(annotation) {
   const defs = createSvg("defs");
   const marker = createSvg("marker", {
     id: markerId,
-    markerWidth: "10",
-    markerHeight: "10",
-    refX: "9",
-    refY: "5",
+    markerWidth: "5",
+    markerHeight: "5",
+    refX: "4.6",
+    refY: "2.5",
     orient: "auto",
     markerUnits: "strokeWidth",
+    viewBox: "0 0 5 5",
   });
-  const head = createSvg("path", { d: "M0,0 L10,5 L0,10 Z", fill: "currentColor" });
+  const head = createSvg("path", { d: "M0 0 L5 2.5 L0 5 Z", fill: "currentColor" });
   marker.append(head);
   defs.append(marker);
   const start = getArrowStartPoint(annotation);
@@ -2846,7 +2963,7 @@ function focusAnnotationInput(annotationId) {
       input?.focus();
     }
     input?.select();
-    resetDocumentScroll();
+    scheduleMobileViewportSync();
   });
 }
 
@@ -2854,17 +2971,26 @@ function syncMobileViewportGeometry() {
   if (!isMobileLayout()) {
     document.documentElement.style.removeProperty("--mobile-visual-offset-top");
     document.documentElement.style.removeProperty("--mobile-visual-bottom-inset");
+    mobileStableViewportHeight = 0;
     return;
   }
 
   const viewport = window.visualViewport;
   const offsetTop = Math.max(0, viewport?.offsetTop || 0);
   const viewportHeight = viewport?.height || window.innerHeight;
-  const bottomInset = Math.max(0, window.innerHeight - offsetTop - viewportHeight);
+  const layoutHeight = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0, viewportHeight);
+  const keyboardFocused = isMobileKeyboardTarget(document.activeElement);
+
+  if (!keyboardFocused || !mobileStableViewportHeight) {
+    mobileStableViewportHeight = layoutHeight;
+  }
+
+  const baselineHeight = Math.max(mobileStableViewportHeight, layoutHeight, viewportHeight);
+  const bottomInset = Math.max(0, baselineHeight - offsetTop - viewportHeight);
 
   document.documentElement.style.setProperty("--mobile-visual-offset-top", `${offsetTop}px`);
   document.documentElement.style.setProperty("--mobile-visual-bottom-inset", `${bottomInset}px`);
-  resetDocumentScroll();
+  if (!keyboardFocused) resetDocumentScroll();
 }
 
 function resetDocumentScroll() {
@@ -2872,6 +2998,22 @@ function resetDocumentScroll() {
   window.scrollTo(0, 0);
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
+}
+
+function setAnnotationOperating(active) {
+  document.body.classList.toggle("annotation-operating", active);
+}
+
+function isMobileKeyboardTarget(target) {
+  return isMobileLayout() && !!target?.matches?.("input, textarea, select, [contenteditable='true']");
+}
+
+function scheduleMobileViewportSync() {
+  if (!isMobileLayout()) return;
+  window.clearTimeout(mobileViewportSyncTimer);
+  syncMobileViewportGeometry();
+  requestAnimationFrame(syncMobileViewportGeometry);
+  mobileViewportSyncTimer = window.setTimeout(syncMobileViewportGeometry, 320);
 }
 
 function openAnnotationEditor(annotationId) {
@@ -2960,6 +3102,7 @@ function bindMarkMove(box, annotation) {
     const startY = annotation.y;
     let moved = false;
     box.classList.add("moving");
+    setAnnotationOperating(true);
     beginAnnotationOperationMagnifier(event, page);
 
     const move = (moveEvent) => {
@@ -2985,6 +3128,7 @@ function bindMarkMove(box, annotation) {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       box.classList.remove("moving");
+      setAnnotationOperating(false);
       stopMagnifier();
       if (moved && !annotation.draft) {
         touchAnnotation(annotation);
@@ -3165,11 +3309,12 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
     const fixedBottom = startY + startHeight;
     const box = handle.closest(".mark-box");
     box.classList.add("resizing");
+    setAnnotationOperating(true);
     beginAnnotationOperationMagnifier(event, page);
 
     const move = (moveEvent) => {
       const next = getPagePoint(moveEvent, page);
-      updateAnnotationOperationMagnifier(moveEvent);
+      let activeCornerPoint;
       if (corner === "top-left") {
         const nextX = clamp(startX + next.x - start.x, 0, fixedRight - 4);
         const nextY = clamp(startY + next.y - start.y, 0, fixedBottom);
@@ -3179,12 +3324,15 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
         annotation.height = fixedBottom - nextY;
         box.style.left = `${annotation.x}%`;
         box.style.top = `${annotation.y}%`;
+        activeCornerPoint = { x: annotation.x, y: annotation.y };
       } else {
         annotation.width = clamp(startWidth + next.x - start.x, 4, 100 - annotation.x);
         annotation.height = clamp(startHeight + next.y - start.y, 0, 100 - annotation.y);
+        activeCornerPoint = { x: annotation.x + annotation.width, y: annotation.y + annotation.height };
       }
       box.style.width = `${annotation.width}%`;
       box.style.height = `${annotation.height}%`;
+      updateAnnotationOperationMagnifier(getPageClientPoint(page, activeCornerPoint));
       updateAnnotationArrow(annotation);
       syncAnnotationEditorPosition(annotation);
       scheduleRegionPreviewRefresh(annotation.id);
@@ -3195,6 +3343,7 @@ function bindAnnotationResize(handle, annotation, corner = "bottom-right") {
       window.removeEventListener("pointerup", stop);
       window.removeEventListener("pointercancel", stop);
       box.classList.remove("resizing");
+      setAnnotationOperating(false);
       stopMagnifier();
       if (!annotation.draft) {
         touchAnnotation(annotation);
@@ -4021,7 +4170,7 @@ const byPage=new Map(data.pages.map(p=>[String(p.id),p]));
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function label(a){return a.intentLabel+" · "+(document.documentElement.lang.startsWith("zh")?"第 "+a.pageId+" 页":"Page "+a.pageId)}
 data.pages.forEach(p=>{const el=document.createElement("section");el.className="page";el.id="page-"+p.id;el.style.aspectRatio=p.width+"/"+p.height;el.innerHTML='<span class="badge">Page '+esc(p.id)+'</span><img src="'+p.image+'" alt="Page '+esc(p.id)+'">';pages.append(el)});
-data.annotations.forEach(a=>{const page=document.querySelector("#page-"+CSS.escape(String(a.pageId)));if(!page)return;const c=a.color||"#6e7cff";if(a.type==="mark"){const el=document.createElement("div");el.className="mark "+(a.intent==="deleteContent"?"delete":"");el.style.cssText="--c:"+c+";left:"+a.x+"%;top:"+a.y+"%;width:"+a.width+"%;height:"+a.height+"%";el.dataset.id=a.id;el.innerHTML='<div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(el)}else{const wrap=document.createElement("div");wrap.className="dot-wrap";wrap.style.cssText="left:"+a.x+"%;top:"+a.y+"%";wrap.dataset.id=a.id;wrap.innerHTML='<span class="dot" style="--c:'+c+'"></span><div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(wrap)}if(Number.isFinite(a.arrowX)&&Number.isFinite(a.arrowY)){const start=a.arrowAnchor==="right"?[a.x+a.width,a.y+a.height/2]:a.arrowAnchor==="bottom"?[a.x+a.width/2,a.y+a.height]:a.arrowAnchor==="left"?[a.x,a.y+a.height/2]:[a.x+a.width/2,a.y];const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.classList.add("arrow");svg.style.setProperty("--c",c);svg.style.setProperty("--w",(a.arrowWidth||.75)+"px");svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("preserveAspectRatio","none");svg.innerHTML='<defs><marker id="m-'+a.id+'" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="currentColor"/></marker></defs><line x1="'+start[0]+'" y1="'+start[1]+'" x2="'+a.arrowX+'" y2="'+a.arrowY+'" marker-end="url(#m-'+a.id+')"/>';page.append(svg)}});
+data.annotations.forEach(a=>{const page=document.querySelector("#page-"+CSS.escape(String(a.pageId)));if(!page)return;const c=a.color||"#6e7cff";if(a.type==="mark"){const el=document.createElement("div");el.className="mark "+(a.intent==="deleteContent"?"delete":"");el.style.cssText="--c:"+c+";left:"+a.x+"%;top:"+a.y+"%;width:"+a.width+"%;height:"+a.height+"%";el.dataset.id=a.id;el.innerHTML='<div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(el)}else{const wrap=document.createElement("div");wrap.className="dot-wrap";wrap.style.cssText="left:"+a.x+"%;top:"+a.y+"%";wrap.dataset.id=a.id;wrap.innerHTML='<span class="dot" style="--c:'+c+'"></span><div class="tooltip">'+esc(a.text||a.fallbackText)+'</div>';page.append(wrap)}if(Number.isFinite(a.arrowX)&&Number.isFinite(a.arrowY)){const start=a.arrowAnchor==="right"?[a.x+a.width,a.y+a.height/2]:a.arrowAnchor==="bottom"?[a.x+a.width/2,a.y+a.height]:a.arrowAnchor==="left"?[a.x,a.y+a.height/2]:[a.x+a.width/2,a.y];const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.classList.add("arrow");svg.style.setProperty("--c",c);svg.style.setProperty("--w",(a.arrowWidth||.75)+"px");svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("preserveAspectRatio","none");svg.innerHTML='<defs><marker id="m-'+a.id+'" markerWidth="5" markerHeight="5" refX="4.6" refY="2.5" orient="auto" markerUnits="strokeWidth" viewBox="0 0 5 5"><path d="M0 0 L5 2.5 L0 5 Z" fill="currentColor"/></marker></defs><line x1="'+start[0]+'" y1="'+start[1]+'" x2="'+a.arrowX+'" y2="'+a.arrowY+'" marker-end="url(#m-'+a.id+')"/>';page.append(svg)}});
 const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.pageId)))groups.set(String(a.pageId),[]);groups.get(String(a.pageId)).push(a)});count.textContent=data.annotations.length;[...groups.entries()].sort((a,b)=>Number(a[0])-Number(b[0])).forEach(([pageId,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+(document.documentElement.lang.startsWith("zh")?"第 "+esc(pageId)+" 页":"Page "+esc(pageId))+'</span><span>'+items.length+'</span></div>';items.sort((a,b)=>(Number(a.renderIndex||0))-(Number(b.renderIndex||0))).forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",a.color||"#6e7cff");card.innerHTML='<span class="avatar">'+esc(a.renderIndex||"")+'</span><div><strong>'+esc(label(a))+'</strong><p>'+esc(a.text||a.fallbackText)+'</p>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"")+(a.images?.length?'<div class="refs">'+a.images.map(src=>'<img src="'+src+'" alt="">').join("")+'</div>':"")+'</div>';g.append(card)});comments.append(g)});
 function setActive(id,on){if(!id)return;document.body.classList.toggle("mask-active",on);document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
 document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));

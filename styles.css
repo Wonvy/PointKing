@@ -3,6 +3,7 @@
   --left-width: 272px;
   --right-width: 320px;
   --mobile-topbar-height: 105px;
+  --mobile-statusbar-height: 34px;
   --mobile-visual-offset-top: 0px;
   --mobile-visual-bottom-inset: 0px;
   --bg: #08090c;
@@ -843,7 +844,7 @@ svg {
   position: fixed;
   z-index: 80;
   display: none;
-  width: 168px;
+  width: 146px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 96%, transparent);
@@ -861,13 +862,14 @@ svg {
   display: flex;
   height: 34px;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
   border-radius: 6px;
   background: transparent;
   color: var(--soft);
-  padding: 0 9px;
+  padding: 0 8px;
   font-size: 13px;
-  text-align: left;
+  text-align: center;
 }
 
 .export-menu button:hover {
@@ -1392,6 +1394,12 @@ svg {
   box-shadow: none;
 }
 
+.tool.magnifier-toggle.active {
+  background: color-mix(in srgb, var(--accent) 24%, rgba(255, 255, 255, 0.04));
+  color: #dfe4ff;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
 .primary {
   width: 76px;
   gap: 0;
@@ -1407,6 +1415,11 @@ svg {
 .primary:hover {
   background: color-mix(in srgb, var(--accent) 88%, white);
   color: white;
+}
+
+.primary svg,
+.primary i {
+  display: none;
 }
 
 .mobile-file-btn {
@@ -2506,6 +2519,18 @@ html[data-theme="light"] .placeholder {
   transform: translate(-50%, 0);
 }
 
+.annotation-operating .annotation-detail-line,
+.annotation-operating .annotation-detail-callout,
+.annotation-operating .annotation-ui:not(.moving):not(.resizing) .annotation-index-badge,
+.annotation-operating .annotation-ui:not(.moving):not(.resizing) .resize-corner,
+.annotation-operating .annotation-ui:not(.moving):not(.resizing) .arrow-anchor,
+.annotation-operating .annotation-ui:not(.moving):not(.resizing) .annotation-arrow,
+.annotation-operating .annotation-ui.moving > .annotation-tooltip,
+.annotation-operating .annotation-ui.resizing > .annotation-tooltip {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .text-note .annotation-tooltip {
   left: 12px;
   bottom: calc(100% + 9px);
@@ -3472,8 +3497,8 @@ html[data-theme="light"] .comment.active {
   .rail {
     position: fixed;
     z-index: 30;
-    top: 0;
-    bottom: 0;
+    top: var(--mobile-topbar-height);
+    bottom: var(--mobile-statusbar-height);
     left: 0;
     display: grid;
     width: min(82vw, 308px);
@@ -3481,7 +3506,7 @@ html[data-theme="light"] .comment.active {
     align-content: start;
     gap: 14px;
     border-width: 0 1px 0 0;
-    padding: max(16px, env(safe-area-inset-top)) 14px max(16px, env(safe-area-inset-bottom));
+    padding: 14px;
     background: color-mix(in srgb, var(--panel) 96%, transparent);
     box-shadow: 18px 0 44px rgba(0, 0, 0, 0.38);
     opacity: 1;
@@ -3493,7 +3518,7 @@ html[data-theme="light"] .comment.active {
 
   .app.left-collapsed .rail {
     border-width: 0 1px 0 0;
-    padding: max(16px, env(safe-area-inset-top)) 14px max(16px, env(safe-area-inset-bottom));
+    padding: 14px;
     opacity: 1;
     pointer-events: none;
     transform: translateX(calc(-100% - 18px));
@@ -3501,14 +3526,11 @@ html[data-theme="light"] .comment.active {
 
   .rail .panel {
     display: block;
-    margin-top: 8px;
+    margin-top: 0;
   }
 
   .rail .dropzone {
-    min-height: 116px;
-    grid-auto-flow: row;
-    justify-content: center;
-    padding: 14px;
+    display: none;
   }
 
   .rail .brand {
@@ -3534,10 +3556,45 @@ html[data-theme="light"] .comment.active {
     grid-row: 1;
     display: block;
     padding-top: var(--mobile-topbar-height);
+    padding-bottom: var(--mobile-statusbar-height);
   }
 
   .canvas-viewport {
-    height: calc(100dvh - var(--mobile-topbar-height));
+    height: calc(100dvh - var(--mobile-topbar-height) - var(--mobile-statusbar-height));
+  }
+
+  .statusbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 78;
+    display: flex;
+    height: var(--mobile-statusbar-height);
+    padding: 0 12px max(0px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(16px);
+  }
+
+  .statusbar-item {
+    gap: 4px;
+  }
+
+  .statusbar-label,
+  .statusbar-description,
+  .status-zoom-slider {
+    display: none;
+  }
+
+  .statusbar strong {
+    max-width: 150px;
+    font-size: 11px;
+  }
+
+  .statusbar-icon-toggle {
+    width: 24px;
+    height: 24px;
   }
 
   .tools {
@@ -3546,7 +3603,7 @@ html[data-theme="light"] .comment.active {
     padding: 3px;
   }
 
-  .document-title span {
+  .document-title #docSubtitle {
     display: none;
   }
 
@@ -3570,7 +3627,7 @@ html[data-theme="light"] .comment.active {
   }
 
   .mobile-file-btn {
-    display: inline-flex;
+    display: none;
     height: 36px;
     align-items: center;
     justify-content: center;
@@ -3610,7 +3667,8 @@ html[data-theme="light"] .comment.active {
     box-shadow: none;
   }
 
-  .primary svg {
+  .primary svg,
+  .primary i {
     display: block;
     width: 18px;
     height: 18px;
@@ -3670,11 +3728,12 @@ html[data-theme="light"] .comment.active {
   .resize-handle {
     position: fixed;
     z-index: 32;
-    top: 50%;
+    top: 0;
+    bottom: 0;
     display: block;
     width: 0;
-    height: 0;
-    transform: translateY(-50%);
+    height: auto;
+    transform: none;
     background: transparent;
     cursor: pointer;
   }
@@ -3692,7 +3751,9 @@ html[data-theme="light"] .comment.active {
   }
 
   .collapse-toggle {
-    top: 0;
+    position: fixed;
+    top: calc(var(--mobile-topbar-height) + (100dvh - var(--mobile-topbar-height) - var(--mobile-statusbar-height)) / 2);
+    z-index: 82;
     width: 24px;
     height: 44px;
     border-color: color-mix(in srgb, var(--line) 78%, transparent);
@@ -3728,14 +3789,14 @@ html[data-theme="light"] .comment.active {
   .comments {
     position: fixed;
     z-index: 31;
-    top: 0;
+    top: var(--mobile-topbar-height);
     right: 0;
-    bottom: 0;
+    bottom: var(--mobile-statusbar-height);
     width: min(88vw, 360px);
     max-height: none;
     grid-template-rows: auto auto minmax(0, 1fr);
     border-width: 0 0 0 1px;
-    padding: max(14px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+    padding: 14px 10px 12px;
     background: color-mix(in srgb, var(--panel) 96%, transparent);
     box-shadow: -18px 0 44px rgba(0, 0, 0, 0.38);
     opacity: 1;
@@ -3747,7 +3808,7 @@ html[data-theme="light"] .comment.active {
 
   .app.right-collapsed .comments {
     border-width: 0 0 0 1px;
-    padding: max(14px, env(safe-area-inset-top)) 10px max(12px, env(safe-area-inset-bottom));
+    padding: 14px 10px 12px;
     opacity: 1;
     pointer-events: none;
     transform: translateX(calc(100% + 18px));
@@ -3788,7 +3849,12 @@ html[data-theme="light"] .comment.active {
   }
 
   .comment {
-    padding: 10px;
+    padding: 10px 10px 10px 36px;
+  }
+
+  .comment-index-badge {
+    left: 10px;
+    top: 11px;
   }
 
   .comment-region-preview {
@@ -3799,30 +3865,18 @@ html[data-theme="light"] .comment.active {
     position: fixed;
     left: 10px;
     right: 10px;
-    bottom: calc(var(--mobile-visual-bottom-inset) + env(safe-area-inset-bottom));
+    bottom: calc(var(--mobile-visual-bottom-inset) + var(--mobile-statusbar-height) + env(safe-area-inset-bottom));
     z-index: 80;
     display: block;
     pointer-events: none;
   }
 
   .mobile-zoom-control {
-    position: fixed;
-    left: 18px;
-    right: 18px;
-    bottom: calc(var(--mobile-visual-bottom-inset) + env(safe-area-inset-bottom));
-    z-index: 79;
-    display: grid;
-    height: 28px;
-    align-items: center;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--panel) 78%, transparent);
-    padding: 0 10px;
-    pointer-events: auto;
-    backdrop-filter: blur(14px);
+    display: none;
   }
 
   .mobile-annotation-dock:not(:empty) + .mobile-zoom-control {
-    bottom: calc(var(--mobile-visual-bottom-inset) + env(safe-area-inset-bottom) + 126px);
+    display: none;
   }
 
   .mobile-zoom-control input {
@@ -3882,9 +3936,29 @@ html[data-theme="light"] .comment.active {
   }
 
   .mobile-annotation-dock .annotation-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     height: 30px;
     padding: 0 4px;
     font-size: 11px;
+  }
+
+  .mobile-annotation-dock .annotation-tab-dot {
+    align-self: center;
+  }
+
+  .mobile-annotation-dock .save-shortcut-toggle,
+  .mobile-annotation-dock .save-shortcut-menu {
+    display: none !important;
+  }
+
+  .mobile-annotation-dock .save-annotation-group {
+    gap: 0;
+  }
+
+  .mobile-annotation-dock .save-annotation-group .save-annotation {
+    border-radius: 7px;
   }
 
   .mobile-annotation-dock .mark-input,
