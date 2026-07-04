@@ -17,6 +17,7 @@ const types = {
   ".jpeg": "image/jpeg",
   ".pdf": "application/pdf",
   ".svg": "image/svg+xml",
+  ".mp4": "video/mp4",
 };
 
 createServer((request, response) => {

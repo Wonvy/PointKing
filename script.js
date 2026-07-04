@@ -136,7 +136,7 @@ const translations = {
     pasteNoImage: "\u526a\u8d34\u677f\u91cc\u6ca1\u6709\u53ef\u7c98\u8d34\u7684\u56fe\u7247",
     pastedImage: "\u5df2\u7c98\u8d34\u56fe\u7247",
     droppedFile: "\u5df2\u6dfb\u52a0\u6587\u4ef6",
-    unsupportedDropFile: "\u8bf7\u62d6\u5165 PDF \u6216\u56fe\u7247",
+    unsupportedDropFile: "\u8bf7\u62d6\u5165 PDF\u3001\u56fe\u7247\u6216 MP4",
     submitShortcut: "\u63d0\u4ea4\u65b9\u5f0f",
     enterSubmit: "Enter \u63d0\u4ea4",
     ctrlEnterSubmit: "Ctrl+Enter \u63d0\u4ea4",
@@ -216,7 +216,7 @@ const translations = {
     pasteNoImage: "No image found in the clipboard",
     pastedImage: "Image pasted",
     droppedFile: "File added",
-    unsupportedDropFile: "Drop a PDF or image",
+    unsupportedDropFile: "Drop a PDF, image, or MP4",
     submitShortcut: "Submit shortcut",
     enterSubmit: "Enter to submit",
     ctrlEnterSubmit: "Ctrl+Enter to submit",
@@ -291,6 +291,9 @@ let mobileAnnotationDock = null;
 let mobileStableViewportHeight = 0;
 let mobileViewportSyncTimer = null;
 let creatingBlankDocument = false;
+let currentVideo = null;
+let videoRenderFrame = null;
+let videoHoverActive = false;
 const pendingRegionPreviewIds = new Set();
 const collapsedCommentGroups = new Set();
 const activeCanvasPointers = new Map();
@@ -357,7 +360,13 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.code === "Space" && !isEditableTarget(event.target) && !isMobileLayout() && !hasOpenAnnotationEditor()) {
+  if (event.code === "Space" && shouldSpaceToggleVideo(event)) {
+    event.preventDefault();
+    toggleCurrentVideoPlayback();
+    return;
+  }
+
+  if (event.code === "Space" && !isKeyboardControlTarget(event.target) && !isMobileLayout() && !hasOpenAnnotationEditor()) {
     event.preventDefault();
     spacePanActive = true;
     canvasViewport.classList.add("space-panning");
@@ -382,7 +391,7 @@ document.addEventListener("keyup", (event) => {
   canvasViewport.classList.remove("space-panning");
 });
 
-fileInput.accept = "application/pdf,image/png,image/jpeg,image/webp";
+fileInput.accept = "application/pdf,image/png,image/jpeg,image/webp,video/mp4";
 
 fileInput.addEventListener("change", async (event) => {
   const [file] = event.target.files;
@@ -797,6 +806,7 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   updateSurfaceBounds();
   applyCanvasTransform();
+  drawVideoWaveform();
   syncMobilePanelState();
   syncMobileViewportGeometry();
   syncMagnifierDefaultForLayout();
@@ -1751,8 +1761,12 @@ function isEditableTarget(target) {
   return Boolean(target?.closest?.("input, textarea, [contenteditable='true']"));
 }
 
-function isInteractiveCanvasControl(target) {
+function isKeyboardControlTarget(target) {
   return Boolean(target?.closest?.("button, input, textarea, select, label, [contenteditable='true']"));
+}
+
+function isInteractiveCanvasControl(target) {
+  return Boolean(target?.closest?.("button, input, textarea, select, label, video, [contenteditable='true']"));
 }
 
 function syncMobilePanelState() {
@@ -1873,15 +1887,76 @@ async function runStaticExport() {
 }
 
 function getPagePoint(event, page) {
-  const rect = page.getBoundingClientRect();
+  const rect = getPageCoordinateElement(page).getBoundingClientRect();
   return {
     x: ((event.clientX - rect.left) / rect.width) * 100,
     y: ((event.clientY - rect.top) / rect.height) * 100,
   };
 }
 
+function getPageCoordinateElement(page) {
+  return page?.querySelector?.(".video-stage") || page;
+}
+
+function isVideoFile(file) {
+  return file?.type === "video/mp4" || file?.name?.toLowerCase().endsWith(".mp4");
+}
+
+function isVideoDocumentActive() {
+  return !!currentVideo?.video?.isConnected;
+}
+
+function getVideoPage() {
+  return pageStack.querySelector(".doc-page.video-page");
+}
+
+function shouldSpaceToggleVideo(event) {
+  return videoHoverActive && isVideoDocumentActive() && !isKeyboardControlTarget(event.target) && !hasOpenAnnotationEditor();
+}
+
+function toggleCurrentVideoPlayback() {
+  if (!isVideoDocumentActive()) return;
+  const video = currentVideo.video;
+  if (video.paused) video.play().catch(() => {});
+  else video.pause();
+  updateVideoControls();
+}
+
+function getVideoTimeForPage(pageId) {
+  if (!isVideoDocumentActive()) return null;
+  const page = getVideoPage();
+  if (!page || String(page.dataset.pageId) !== String(pageId)) return null;
+  const time = currentVideo.video.currentTime;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function stampAnnotationVideoTime(annotation) {
+  const videoTime = getVideoTimeForPage(annotation.pageId);
+  if (videoTime == null) return annotation;
+  annotation.videoTime = videoTime;
+  return annotation;
+}
+
+function formatVideoTime(seconds = 0) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const total = Math.floor(safeSeconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const fraction = Math.floor((safeSeconds - total) * 10);
+  const base = hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${minutes}:${String(secs).padStart(2, "0")}`;
+  return `${base}.${fraction}`;
+}
+
+function getAnnotationLocationLabel(annotation) {
+  if (Number.isFinite(annotation.videoTime)) return formatVideoTime(annotation.videoTime);
+  return t("page", { page: annotation.pageId });
+}
+
 function getPageClientPoint(page, point) {
-  const rect = page.getBoundingClientRect();
+  const rect = getPageCoordinateElement(page).getBoundingClientRect();
   return {
     clientX: rect.left + (point.x / 100) * rect.width,
     clientY: rect.top + (point.y / 100) * rect.height,
@@ -1893,6 +1968,7 @@ function addAnnotation(annotation) {
   annotation.color ||= defaultAnnotationColor;
   annotation.createdAt ||= Date.now();
   annotation.updatedAt ||= annotation.createdAt;
+  stampAnnotationVideoTime(annotation);
   annotations.push(annotation);
   renderAnnotations();
   return annotation;
@@ -1965,6 +2041,14 @@ function createTextAnnotationAtEvent(event, page) {
   focusAnnotationInput(annotation.id);
 }
 
+function shouldDrawAnnotationOnCanvas(annotation) {
+  if (annotation.draft || annotation.preview) return true;
+  if (!Number.isFinite(annotation.videoTime)) return true;
+  if (!isVideoDocumentActive()) return true;
+  const currentTime = currentVideo.video.currentTime || 0;
+  return Math.abs(currentTime - annotation.videoTime) <= 0.35;
+}
+
 function renderAnnotations() {
   clearMobileAnnotationDock();
   pageStack.querySelectorAll(".overlay").forEach((overlay) => {
@@ -1983,10 +2067,12 @@ function renderAnnotations() {
     const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
     if (!page) return;
 
-    const layer = getAnnotationLayer(page);
     annotation.renderIndex = annotationOrder.get(annotation.id) || "";
-    if (annotation.type === "mark") drawMark(layer, annotation);
-    if (annotation.type === "text") drawTextNote(layer, annotation);
+    if (shouldDrawAnnotationOnCanvas(annotation)) {
+      const layer = getAnnotationLayer(page);
+      if (annotation.type === "mark") drawMark(layer, annotation);
+      if (annotation.type === "text") drawTextNote(layer, annotation);
+    }
     if (!annotation.draft && matchesCommentFilters(annotation)) {
       if (!groupedComments.has(annotation.pageId)) groupedComments.set(annotation.pageId, []);
       groupedComments.get(annotation.pageId).push(annotation);
@@ -2041,6 +2127,7 @@ function matchesCommentFilters(annotation) {
     getAnnotationFallbackText(annotation),
     getAnnotationIntentLabel(annotation),
     t("page", { page: annotation.pageId }),
+    getAnnotationLocationLabel(annotation),
   ]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(commentSearchQuery));
@@ -3476,7 +3563,7 @@ function addComment(annotation, container = commentList) {
   titleMeta.append(titleIntent, time);
   const titlePage = document.createElement("span");
   titlePage.className = "comment-title-page";
-  titlePage.textContent = t("page", { page: annotation.pageId });
+  titlePage.textContent = getAnnotationLocationLabel(annotation);
   title.append(titleMeta, titlePage);
 
   const text = document.createElement("p");
@@ -3493,6 +3580,7 @@ function addComment(annotation, container = commentList) {
 }
 
 function createCommentRegionPreview(annotation) {
+  if (Number.isFinite(annotation.videoTime)) return null;
   const src = createAnnotationRegionImage(annotation);
   if (!src) return null;
 
@@ -3520,6 +3608,7 @@ function createAnnotationRegionImage(annotation) {
   const page = pageStack.querySelector(`.doc-page[data-page-id="${annotation.pageId}"]`);
   const canvas = page?.querySelector("canvas");
   if (!canvas?.width || !canvas?.height || !annotation.width || !annotation.height) return "";
+  if (Number.isFinite(annotation.videoTime)) drawCurrentVideoFrame();
 
   const sx = clamp((annotation.x / 100) * canvas.width, 0, canvas.width);
   const sy = clamp((annotation.y / 100) * canvas.height, 0, canvas.height);
@@ -3635,7 +3724,7 @@ function hideCommentImagePreview() {
 
 function openFilePicker() {
   fileInput.value = "";
-  fileInput.accept = "application/pdf,image/png,image/jpeg,image/webp";
+  fileInput.accept = "application/pdf,image/png,image/jpeg,image/webp,video/mp4";
 
   try {
     if (typeof fileInput.showPicker === "function") {
@@ -3675,7 +3764,7 @@ function hasSupportedDragFile(dataTransfer) {
 }
 
 function getSupportedDropFile(files) {
-  return [...(files || [])].find((file) => file.type === "application/pdf" || file.type.startsWith("image/")) || null;
+  return [...(files || [])].find((file) => file.type === "application/pdf" || file.type.startsWith("image/") || isVideoFile(file)) || null;
 }
 
 async function openExportImagePreview() {
@@ -4332,8 +4421,39 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
 }
 
-function focusAnnotationFromComment(annotationId) {
+async function focusAnnotationFromComment(annotationId) {
+  await seekVideoToAnnotation(annotationId);
   fitAnnotationPageInViewport(annotationId, { force: true });
+}
+
+function seekVideoToAnnotation(annotationId) {
+  const annotation = annotations.find((item) => item.id === annotationId);
+  if (!annotation || !Number.isFinite(annotation.videoTime) || !isVideoDocumentActive()) return Promise.resolve(false);
+
+  const video = currentVideo.video;
+  const targetTime = clamp(annotation.videoTime, 0, Number.isFinite(video.duration) ? video.duration : annotation.videoTime);
+  video.pause();
+  if (Math.abs((video.currentTime || 0) - targetTime) < 0.03) {
+    drawCurrentVideoFrame();
+    renderAnnotations();
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener("seeked", finish);
+      window.clearTimeout(timer);
+      drawCurrentVideoFrame();
+      renderAnnotations();
+      resolve(true);
+    };
+    const timer = window.setTimeout(finish, 900);
+    video.addEventListener("seeked", finish, { once: true });
+    video.currentTime = targetTime;
+  });
 }
 
 function ensureAnnotationVisible(annotationId) {
@@ -4452,6 +4572,7 @@ function highlightAnnotation(annotationId) {
 
 async function loadFile(file, options = {}) {
   const shouldStoreFile = options.store !== false;
+  cleanupCurrentVideo();
   currentDocumentKey = getDocumentKey(file);
   deletedPageIds = await readDeletedPageIds(currentDocumentKey);
   try {
@@ -4493,11 +4614,20 @@ async function loadFile(file, options = {}) {
     if (!hasDocumentPages()) renderEmptyDocumentState();
     activateMobileAnnotationTool();
     renderDocumentList();
+    return;
+  }
+
+  if (isVideoFile(file)) {
+    await renderVideo(file);
+    updateCurrentDocumentThumbnail();
+    activateMobileAnnotationTool();
+    renderDocumentList();
   }
 }
 
 function resetPages() {
   hideStartupPanel();
+  cleanupCurrentVideo();
   pageStack.replaceChildren();
   renderAnnotations();
 }
@@ -4609,6 +4739,337 @@ function drawImageAsPage(image, pageId) {
   return canvas;
 }
 
+function renderVideo(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    let resolved = false;
+
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
+    const fail = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unsupported video"));
+    };
+
+    video.className = "doc-video";
+    video.controls = false;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.src = url;
+
+    video.addEventListener("loadedmetadata", () => {
+      const width = Math.max(1, video.videoWidth || 1280);
+      const height = Math.max(1, video.videoHeight || 720);
+      const { page, canvas } = createPage(1, width, height);
+      page.classList.add("video-page");
+      page.dataset.mediaType = "video";
+      page.style.aspectRatio = "auto";
+      page.style.minHeight = "0";
+      const stage = createVideoStage(page, width, height);
+      canvas.width = width;
+      canvas.height = height;
+      canvas.classList.add("video-frame-canvas");
+      stage.insertBefore(video, stage.querySelector(".overlay"));
+      stage.insertBefore(createVideoAnnotationHitbox(), stage.querySelector(".annotation-layer"));
+      const controls = createVideoControls(video);
+      page.append(controls.root);
+      currentVideo = { video, canvas, controls, url, waveform: null };
+      bindVideoHoverShortcuts(page);
+      setFileMetaText(`${formatBytes(file.size)} \u00b7 MP4 \u00b7 ${formatVideoTime(video.duration || 0)} \u00b7 \u672c\u5730\u9884\u89c8`);
+      bindVideoFrameSync(video);
+      updateVideoControls();
+      buildVideoWaveform(file);
+      const completeVideoRender = () => requestAnimationFrame(() => {
+        drawCurrentVideoFrame();
+        renderAnnotations();
+        updateVideoControls();
+        resetCanvasView();
+        finish();
+      });
+      if (video.readyState >= 2) {
+        completeVideoRender();
+      } else {
+        const fallbackTimer = window.setTimeout(completeVideoRender, 650);
+        video.addEventListener("loadeddata", () => {
+          window.clearTimeout(fallbackTimer);
+          completeVideoRender();
+        }, { once: true });
+      }
+    }, { once: true });
+    video.addEventListener("error", fail, { once: true });
+  });
+}
+
+function createVideoAnnotationHitbox() {
+  const hitbox = document.createElement("div");
+  hitbox.className = "video-annotation-hitbox";
+  hitbox.setAttribute("aria-hidden", "true");
+  return hitbox;
+}
+
+function createVideoStage(page, width, height) {
+  const stage = document.createElement("div");
+  stage.className = "video-stage";
+  stage.style.aspectRatio = `${width} / ${height}`;
+  const canvas = page.querySelector("canvas");
+  const overlay = page.querySelector(".overlay");
+  const layer = page.querySelector(".annotation-layer");
+  if (canvas) stage.append(canvas);
+  if (overlay) stage.append(overlay);
+  if (layer) stage.append(layer);
+  page.prepend(stage);
+  return stage;
+}
+
+function bindVideoHoverShortcuts(page) {
+  page.addEventListener("pointerenter", () => {
+    videoHoverActive = true;
+  });
+  page.addEventListener("pointerleave", () => {
+    videoHoverActive = false;
+  });
+}
+
+function createVideoControls(video) {
+  const root = document.createElement("div");
+  root.className = "video-controls";
+  root.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+  const playButton = document.createElement("button");
+  playButton.className = "video-control-button video-play-button";
+  playButton.type = "button";
+  playButton.addEventListener("click", toggleCurrentVideoPlayback);
+
+  const muteButton = document.createElement("button");
+  muteButton.className = "video-control-button video-mute-button";
+  muteButton.type = "button";
+  muteButton.addEventListener("click", () => {
+    video.muted = !video.muted;
+    updateVideoControls();
+  });
+
+  const current = document.createElement("span");
+  current.className = "video-time video-time-current";
+
+  const duration = document.createElement("span");
+  duration.className = "video-time video-time-duration";
+
+  const speedSelect = document.createElement("select");
+  speedSelect.className = "video-speed";
+  speedSelect.setAttribute("aria-label", currentLanguage === "zh" ? "\u64ad\u653e\u500d\u901f" : "Playback speed");
+  [0.5, 0.75, 1, 1.25, 1.5, 2].forEach((speed) => {
+    const option = document.createElement("option");
+    option.value = String(speed);
+    option.textContent = `${speed}x`;
+    option.selected = speed === 1;
+    speedSelect.append(option);
+  });
+  speedSelect.addEventListener("change", () => {
+    video.playbackRate = Number(speedSelect.value) || 1;
+    updateVideoControls();
+  });
+
+  const timelineWrap = document.createElement("div");
+  timelineWrap.className = "video-timeline-wrap";
+  const timeline = document.createElement("input");
+  timeline.className = "video-timeline";
+  timeline.type = "range";
+  timeline.min = "0";
+  timeline.max = "1000";
+  timeline.step = "1";
+  timeline.value = "0";
+  timeline.setAttribute("aria-label", currentLanguage === "zh" ? "\u89c6\u9891\u65f6\u95f4\u8f74" : "Video timeline");
+  timeline.addEventListener("input", () => {
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const nextTime = duration * (Number(timeline.value) / 1000);
+    video.currentTime = clamp(nextTime, 0, duration || nextTime);
+    drawCurrentVideoFrame();
+    renderAnnotations();
+    updateVideoControls();
+  });
+  timelineWrap.append(timeline);
+
+  const waveform = document.createElement("canvas");
+  waveform.className = "video-waveform";
+  waveform.width = 900;
+  waveform.height = 54;
+  waveform.setAttribute("aria-label", currentLanguage === "zh" ? "\u97f3\u9891\u6ce2\u5f62" : "Audio waveform");
+
+  const top = document.createElement("div");
+  top.className = "video-control-top";
+  top.append(playButton, current, duration, speedSelect, muteButton);
+  root.append(top, timelineWrap, waveform);
+  return { root, playButton, muteButton, speedSelect, timeline, current, duration, waveform };
+}
+
+function bindVideoFrameSync(video) {
+  ["loadeddata", "seeked", "pause"].forEach((eventName) => {
+    video.addEventListener(eventName, () => {
+      drawCurrentVideoFrame();
+      renderAnnotations();
+      updateVideoControls();
+    });
+  });
+  video.addEventListener("play", () => {
+    updateVideoControls();
+    scheduleVideoAnnotationRender();
+  });
+  video.addEventListener("ended", updateVideoControls);
+  video.addEventListener("timeupdate", scheduleVideoAnnotationRender);
+}
+
+function scheduleVideoAnnotationRender() {
+  if (videoRenderFrame) return;
+  videoRenderFrame = requestAnimationFrame(() => {
+    videoRenderFrame = null;
+    drawCurrentVideoFrame();
+    renderAnnotations();
+    updateVideoControls();
+  });
+}
+
+function updateVideoControls() {
+  if (!currentVideo?.controls) return;
+  const { video, controls } = currentVideo;
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  const nextIcon = video.paused ? "play" : "pause";
+  const iconChanged = controls.playButton.dataset.icon !== nextIcon;
+  if (iconChanged) {
+    controls.playButton.dataset.icon = nextIcon;
+    controls.playButton.replaceChildren(createIconPlaceholder(nextIcon));
+  }
+  controls.playButton.title = video.paused
+    ? (currentLanguage === "zh" ? "\u64ad\u653e" : "Play")
+    : (currentLanguage === "zh" ? "\u6682\u505c" : "Pause");
+  controls.playButton.setAttribute("aria-label", controls.playButton.title);
+  const nextMuteIcon = video.muted || video.volume === 0 ? "volume-x" : "volume-2";
+  const muteIconChanged = controls.muteButton.dataset.icon !== nextMuteIcon;
+  if (muteIconChanged) {
+    controls.muteButton.dataset.icon = nextMuteIcon;
+    controls.muteButton.replaceChildren(createIconPlaceholder(nextMuteIcon));
+  }
+  controls.muteButton.title = video.muted || video.volume === 0
+    ? (currentLanguage === "zh" ? "\u53d6\u6d88\u9759\u97f3" : "Unmute")
+    : (currentLanguage === "zh" ? "\u9759\u97f3" : "Mute");
+  controls.muteButton.setAttribute("aria-label", controls.muteButton.title);
+  controls.speedSelect.value = String(video.playbackRate || 1);
+  controls.current.textContent = formatVideoTime(currentTime);
+  controls.duration.textContent = formatVideoTime(duration);
+  controls.timeline.value = duration ? String(Math.round((currentTime / duration) * 1000)) : "0";
+  controls.timeline.disabled = !duration;
+  drawVideoWaveformProgress();
+  if (iconChanged || muteIconChanged) renderLucideIcons();
+}
+
+async function buildVideoWaveform(file) {
+  const targetVideo = currentVideo?.video;
+  const controls = currentVideo?.controls;
+  if (!targetVideo || !controls?.waveform) return;
+
+  drawVideoWaveform([]);
+  try {
+    const buffer = await file.arrayBuffer();
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const audioContext = new AudioContextClass();
+    const audioBuffer = await audioContext.decodeAudioData(buffer.slice(0));
+    const peaks = getAudioPeaks(audioBuffer, 180);
+    await audioContext.close?.();
+    if (currentVideo?.video !== targetVideo) return;
+    currentVideo.waveform = peaks;
+    drawVideoWaveform(peaks);
+  } catch {
+    if (currentVideo?.video === targetVideo) drawVideoWaveform([]);
+  }
+}
+
+function getAudioPeaks(audioBuffer, count) {
+  const channel = audioBuffer.getChannelData(0);
+  const blockSize = Math.max(1, Math.floor(channel.length / count));
+  return Array.from({ length: count }, (_, index) => {
+    const start = index * blockSize;
+    const end = Math.min(channel.length, start + blockSize);
+    let max = 0;
+    for (let i = start; i < end; i += 1) {
+      const value = Math.abs(channel[i] || 0);
+      if (value > max) max = value;
+    }
+    return max;
+  });
+}
+
+function drawVideoWaveform(peaks = currentVideo?.waveform || []) {
+  const canvas = currentVideo?.controls?.waveform;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.max(320, Math.round((rect.width || canvas.clientWidth || 900) * dpr));
+  const height = Math.max(36, Math.round((rect.height || canvas.clientHeight || 54) * dpr));
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = getCanvasCssColor("--panel-2", "#111827");
+  context.fillRect(0, 0, width, height);
+
+  const bars = peaks.length ? peaks : Array.from({ length: 96 }, (_, index) => 0.08 + Math.sin(index * 0.65) * 0.025);
+  const gap = Math.max(1, Math.round(2 * dpr));
+  const barWidth = Math.max(1, Math.floor((width - gap * (bars.length - 1)) / bars.length));
+  const center = height / 2;
+  context.fillStyle = getCanvasCssColor("--accent-2", "#00c2a8");
+  bars.forEach((peak, index) => {
+    const normalized = clamp(Number(peak) || 0, 0, 1);
+    const barHeight = Math.max(2 * dpr, normalized * height * 0.82);
+    const x = index * (barWidth + gap);
+    context.fillRect(x, center - barHeight / 2, barWidth, barHeight);
+  });
+  drawVideoWaveformProgressLine(context, width, height);
+}
+
+function drawVideoWaveformProgress() {
+  drawVideoWaveform(currentVideo?.waveform || []);
+}
+
+function drawVideoWaveformProgressLine(context, width, height) {
+  const canvas = currentVideo?.controls?.waveform;
+  const video = currentVideo?.video;
+  if (!canvas || !video) return;
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  const progress = duration ? clamp((video.currentTime || 0) / duration, 0, 1) : 0;
+  const x = Math.round(width * progress);
+  context.fillStyle = "rgba(255, 255, 255, 0.88)";
+  context.fillRect(Math.max(0, x - 1), 0, 2, height);
+}
+
+function getCanvasCssColor(name, fallback) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function drawCurrentVideoFrame() {
+  if (!isVideoDocumentActive()) return;
+  const { video, canvas } = currentVideo;
+  if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return;
+  if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth;
+  if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+}
+
+function cleanupCurrentVideo() {
+  if (videoRenderFrame) {
+    cancelAnimationFrame(videoRenderFrame);
+    videoRenderFrame = null;
+  }
+  videoHoverActive = false;
+  if (currentVideo?.url) URL.revokeObjectURL(currentVideo.url);
+  currentVideo = null;
+}
+
 function hasDocumentPages() {
   return pageStack.querySelector(".doc-page") != null;
 }
@@ -4689,7 +5150,7 @@ async function addDroppedFileToBoard(file) {
     return;
   }
 
-  if (file.type === "application/pdf") {
+  if (file.type === "application/pdf" || isVideoFile(file)) {
     await loadFile(file);
   }
 }
@@ -4849,7 +5310,7 @@ function renderDocumentList() {
       documentList.append(empty);
     }
     fileName.textContent = currentDocumentKey ? docTitle.textContent : "\u672a\u9009\u62e9\u6587\u4ef6";
-    setFileMetaText(currentDocumentKey ? fileMeta.textContent : "PDF, PNG, JPG");
+    setFileMetaText(currentDocumentKey ? fileMeta.textContent : "PDF, PNG, JPG, MP4");
     syncRailDocumentPreview();
     return;
   }
@@ -4934,6 +5395,7 @@ function renderDocumentList() {
 function getDocumentTypeLabel(record) {
   if (record.kind === "blank") return "NEW";
   if (record.type === "application/pdf") return "PDF";
+  if (record.type === "video/mp4" || record.name?.toLowerCase().endsWith(".mp4")) return "MP4";
   if (record.type?.startsWith("image/")) return "IMG";
   return "DOC";
 }
@@ -5185,7 +5647,7 @@ function showStartupPage() {
   annotations = [];
   docTitle.textContent = t("appTitle");
   fileName.textContent = "\u672a\u9009\u62e9\u6587\u4ef6";
-  setFileMetaText("PDF, PNG, JPG");
+  setFileMetaText("PDF, PNG, JPG, MP4");
   statusFileName.textContent = "\u672a\u9009\u62e9\u6587\u4ef6";
   try {
     localStorage.removeItem(lastDocumentKey);
