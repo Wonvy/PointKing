@@ -111,8 +111,8 @@ async function handleShareApi(request, response, url) {
     await receiveSharedFile(request, response, session);
     return;
   }
-  if (parts[3] === "file" && request.method === "GET") {
-    await serveSharedFile(response, session);
+  if (parts[3] === "file" && (request.method === "GET" || request.method === "HEAD")) {
+    await serveSharedFile(request, response, session);
     return;
   }
   if (parts[3] === "events" && request.method === "GET") {
@@ -189,20 +189,57 @@ async function receiveSharedFile(request, response, session) {
   request.pipe(output);
 }
 
-async function serveSharedFile(response, session) {
+async function serveSharedFile(request, response, session) {
   const filePath = join(getSessionDirectory(session.id), "source.bin");
   const info = await stat(filePath).catch(() => null);
   if (!info?.isFile()) {
     sendJson(response, 404, { error: "shared_file_not_found" });
     return;
   }
-  response.writeHead(200, {
+  const range = parseByteRange(request.headers.range, info.size);
+  if (range === false) {
+    response.writeHead(416, {
+      "Content-Range": `bytes */${info.size}`,
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "private, no-store",
+    });
+    response.end();
+    return;
+  }
+  const start = range?.start ?? 0;
+  const end = range?.end ?? Math.max(0, info.size - 1);
+  const status = range ? 206 : 200;
+  const headers = {
     "Content-Type": session.file?.type || "application/octet-stream",
-    "Content-Length": info.size,
+    "Content-Length": Math.max(0, end - start + 1),
     "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(session.file?.name || "document")}`,
     "Cache-Control": "private, no-store",
-  });
-  createReadStream(filePath).pipe(response);
+    "Accept-Ranges": "bytes",
+  };
+  if (range) headers["Content-Range"] = `bytes ${start}-${end}/${info.size}`;
+  response.writeHead(status, headers);
+  if (request.method === "HEAD") response.end();
+  else createReadStream(filePath, { start, end }).pipe(response);
+}
+
+function parseByteRange(value, size) {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(value).trim());
+  if (!match || (!match[1] && !match[2]) || size <= 0) return false;
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return false;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) return false;
+    end = Math.min(end, size - 1);
+  }
+  return { start, end };
 }
 
 function openEventStream(request, response, url, session) {

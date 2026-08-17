@@ -48,7 +48,16 @@ nginx -t
 systemctl daemon-reload
 systemctl enable pointking.service
 systemctl restart pointking.service
-curl --fail --silent --show-error http://127.0.0.1:18081/ >/dev/null
+for attempt in {1..20}; do
+  if curl --fail --silent http://127.0.0.1:18081/ >/dev/null; then
+    break
+  fi
+  if [[ "$attempt" -eq 20 ]]; then
+    echo "PointKing did not become healthy after restart" >&2
+    exit 1
+  fi
+  sleep 0.5
+done
 nginx -s reload
 
 systemctl --no-pager --full status pointking.service | sed -n '1,14p'

@@ -93,6 +93,8 @@ const translations = {
     shareExpires: "\u4e0a\u4f20\u7684\u6587\u4ef6\u548c\u94fe\u63a5\u5c06\u5728 24 \u5c0f\u65f6\u540e\u81ea\u52a8\u5220\u9664",
     shareExpired: "\u8fd9\u4e2a\u5206\u4eab\u94fe\u63a5\u5df2\u8fc7\u671f",
     shareLoadFailed: "\u65e0\u6cd5\u6253\u5f00\u8fd9\u4e2a\u5206\u4eab\u94fe\u63a5",
+    shareLoading: "\u6b63\u5728\u52a0\u8f7d\u5171\u4eab\u6587\u4ef6\u2026",
+    shareLoadingHint: "\u89c6\u9891\u4f1a\u5148\u8bfb\u53d6\u64ad\u653e\u4fe1\u606f，\u65e0\u9700\u7b49\u5f85\u6574\u4e2a\u6587\u4ef6\u4e0b\u8f7d\u3002",
     shareConnecting: "\u6b63\u5728\u8fde\u63a5",
     shareOnline: "\u5b9e\u65f6\u5206\u4eab",
     shareReconnecting: "\u6b63\u5728\u91cd\u8fde",
@@ -199,6 +201,8 @@ const translations = {
     shareExpires: "The uploaded file and link are deleted automatically after 24 hours",
     shareExpired: "This share link has expired",
     shareLoadFailed: "Could not open this share link",
+    shareLoading: "Loading the shared file...",
+    shareLoadingHint: "Videos load playback metadata first, without waiting for the entire file to download.",
     shareConnecting: "Connecting",
     shareOnline: "Live share",
     shareReconnecting: "Reconnecting",
@@ -300,6 +304,7 @@ const annotationIntentColors = {
 };
 const commentFilterOptions = ["all", "suggestion", "editText", "deleteContent"];
 const commentImagePreviewDelay = 450;
+const initialSharedSessionId = getSharedSessionIdFromLocation();
 
 let currentTool = "select";
 let currentLanguage = localStorage.getItem(languageStorageKey) || "zh";
@@ -308,7 +313,7 @@ let detailCalloutsVisible = localStorage.getItem(detailCalloutsStorageKey) === "
 let submitMode = localStorage.getItem(submitModeStorageKey) === "ctrlEnter" ? "ctrlEnter" : "enter";
 let commentViewMode = getStoredCommentViewMode();
 let currentDocumentKey = null;
-let documentCatalog = loadDocumentCatalog();
+let documentCatalog = initialSharedSessionId ? [] : loadDocumentCatalog();
 let selectedDocumentKeys = new Set();
 let lastSelectedDocumentKey = null;
 let deletedPageIds = new Set();
@@ -383,6 +388,7 @@ pdfjs.GlobalWorkerOptions.workerSrc =
   "./vendor/pdfjs/pdf.worker.min.mjs";
 
 commentImagePreview = createCommentImagePreview();
+if (initialSharedSessionId) enterSharedGuestLoadingMode();
 applyTheme();
 applyLanguage();
 restoreLayout();
@@ -5564,6 +5570,7 @@ async function loadFile(file, options = {}) {
   cleanupCurrentVideo();
   currentDocumentKey = options.documentKey || getDocumentKey(file);
   deletedPageIds = shouldRestoreAnnotations ? await readDeletedPageIds(currentDocumentKey) : new Set();
+  if (isVideoFile(file)) deletedPageIds = new Set();
   if (shouldPersistSelection) {
     try {
       localStorage.setItem(lastDocumentKey, currentDocumentKey);
@@ -5736,7 +5743,8 @@ function drawImageAsPage(image, pageId) {
 function renderVideo(file) {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
-    const url = URL.createObjectURL(file);
+    const isSharedSource = typeof file.sharedUrl === "string" && /^https?:/i.test(file.sharedUrl);
+    const url = isSharedSource ? file.sharedUrl : URL.createObjectURL(file);
     let resolved = false;
 
     const finish = () => {
@@ -5745,7 +5753,7 @@ function renderVideo(file) {
       resolve();
     };
     const fail = () => {
-      URL.revokeObjectURL(url);
+      if (!isSharedSource) URL.revokeObjectURL(url);
       reject(new Error("Unsupported video"));
     };
 
@@ -5772,13 +5780,13 @@ function renderVideo(file) {
       stage.insertBefore(createVideoAnnotationHitbox(), stage.querySelector(".annotation-layer"));
       const controls = createVideoControls(video);
       page.append(controls.root);
-      currentVideo = { video, canvas, controls, url, waveform: null, name: file.name };
+      currentVideo = { video, canvas, controls, url, revokeUrl: !isSharedSource, waveform: null, name: file.name };
       updateVideoPageBadge(page);
       bindVideoHoverShortcuts(page);
       setFileMetaText(`${formatBytes(file.size)} \u00b7 MP4 \u00b7 ${formatVideoTime(video.duration || 0)} \u00b7 \u672c\u5730\u9884\u89c8`);
       bindVideoFrameSync(video);
       updateVideoControls();
-      buildVideoWaveform(file);
+      if (!isSharedSource) buildVideoWaveform(file);
       const completeVideoRender = () => requestAnimationFrame(() => {
         drawCurrentVideoFrame();
         renderAnnotations();
@@ -6469,7 +6477,7 @@ function cleanupCurrentVideo() {
   pendingVideoRegionPreviewIds.clear();
   videoRegionPreviewRunning = false;
   videoHoverActive = false;
-  if (currentVideo?.url) URL.revokeObjectURL(currentVideo.url);
+  if (currentVideo?.url && currentVideo.revokeUrl !== false) URL.revokeObjectURL(currentVideo.url);
   currentVideo = null;
 }
 
@@ -6636,7 +6644,7 @@ async function initializeDocument() {
 }
 
 async function initializeApplicationDocument() {
-  const shareId = getSharedSessionIdFromLocation();
+  const shareId = initialSharedSessionId;
   if (!shareId) {
     await initializeDocument();
     return;
@@ -6648,6 +6656,26 @@ async function initializeApplicationDocument() {
     console.error("Unable to open shared PointKing session", error);
     showSharedUnavailable(error?.code === "share_expired" ? t("shareExpired") : t("shareLoadFailed"));
   }
+}
+
+function enterSharedGuestLoadingMode() {
+  document.body.classList.add("share-guest-mode", "share-loading-mode");
+  const loading = document.createElement("div");
+  loading.className = "share-loading";
+  loading.setAttribute("role", "status");
+  const spinner = document.createElement("span");
+  spinner.className = "share-loading-spinner";
+  const title = document.createElement("strong");
+  title.textContent = t("shareLoading");
+  const hint = document.createElement("span");
+  hint.textContent = t("shareLoadingHint");
+  loading.append(spinner, title, hint);
+  canvasViewport.append(loading);
+}
+
+function finishSharedGuestLoadingMode() {
+  document.body.classList.remove("share-loading-mode");
+  document.querySelector(".share-loading")?.remove();
 }
 
 function getSharedSessionIdFromLocation() {
@@ -6726,7 +6754,7 @@ async function createInitialSharedState(sourceFile) {
   const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
   return {
     annotations: snapshot,
-    deletedPageIds: [...deletedPageIds],
+    deletedPageIds: getSharedDeletedPageIds(),
     pages: sourceFile ? [] : captureSharedPageSnapshots(),
     view: getCurrentSharedView(),
     video: getCurrentSharedVideoState(),
@@ -6748,6 +6776,12 @@ function captureSharedPageSnapshots() {
 
 function getCurrentSharedView() {
   return { zoom, panX: pan.x, panY: pan.y };
+}
+
+function getSharedDeletedPageIds() {
+  if (currentVideo) return [];
+  const renderedPageIds = new Set([...pageStack.querySelectorAll(".doc-page")].map((page) => String(page.dataset.pageId)));
+  return [...deletedPageIds].map(String).filter((pageId) => !renderedPageIds.has(pageId));
 }
 
 function getCurrentSharedVideoState() {
@@ -6775,11 +6809,30 @@ async function loadSharedSession(id) {
   applySharedState(session.state || {});
   session.shareUrl = location.href;
   activateSharedSession(session, "guest");
-  document.body.classList.add("share-guest-mode");
+  if (session.file) setFileMetaText(`${formatBytes(session.file.size || 0)} · ${t("shareReady")}`);
+  finishSharedGuestLoadingMode();
 }
 
 async function loadSharedSourceFile(session) {
-  const response = await fetch(`api/share-sessions/${encodeURIComponent(session.id)}/file`, { cache: "no-store" });
+  const sourcePath = `api/share-sessions/${encodeURIComponent(session.id)}/file`;
+  if (String(session.file?.type || "").startsWith("video/") || /\.mp4$/i.test(session.file?.name || "")) {
+    await loadFile({
+      name: session.file.name || "shared-video.mp4",
+      type: session.file.type || "video/mp4",
+      size: Number(session.file.size || 0),
+      lastModified: session.file.lastModified || session.createdAt || Date.now(),
+      sharedUrl: new URL(sourcePath, document.baseURI).href,
+    }, {
+      store: false,
+      catalog: false,
+      persistSelection: false,
+      restoreAnnotations: false,
+      documentKey: `share:${session.id}`,
+    });
+    return;
+  }
+
+  const response = await fetch(sourcePath, { cache: "no-store" });
   if (!response.ok) throw new Error(`Shared file request failed (${response.status})`);
   const blob = await response.blob();
   const file = new File([blob], session.file.name || "shared-document", {
@@ -6830,7 +6883,7 @@ function setRenderedPageId(page, pageId) {
 function applySharedState(state) {
   sharedApplyingRemote = true;
   try {
-    deletedPageIds = new Set((state.deletedPageIds || []).map(String));
+    deletedPageIds = currentVideo ? new Set() : new Set((state.deletedPageIds || []).map(String));
     removeSharedDeletedPages();
     annotations = (state.annotations || []).filter(isSupportedAnnotation).map(normalizeAnnotation);
     renderAnnotations();
@@ -6903,7 +6956,7 @@ function applyRemoteSharedAnnotations(payload) {
   sharedApplyingRemote = true;
   try {
     if (Array.isArray(payload.deletedPageIds)) {
-      deletedPageIds = new Set(payload.deletedPageIds.map(String));
+      deletedPageIds = currentVideo ? new Set() : new Set(payload.deletedPageIds.map(String));
       removeSharedDeletedPages();
     }
     annotations = (payload.annotations || []).filter(isSupportedAnnotation).map(normalizeAnnotation);
@@ -6945,7 +6998,7 @@ function scheduleSharedAnnotationSync() {
   clearTimeout(sharedAnnotationTimer);
   sharedAnnotationTimer = setTimeout(() => {
     const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
-    postSharedEvent("annotations", { annotations: snapshot, deletedPageIds: [...deletedPageIds] }, { queued: true });
+    postSharedEvent("annotations", { annotations: snapshot, deletedPageIds: getSharedDeletedPageIds() }, { queued: true });
     postSharedEvent("activity", { name: sharedSession.role === "host" ? (currentLanguage === "zh" ? "发起人" : "Host") : (currentLanguage === "zh" ? "访客" : "Guest") });
   }, 100);
 }
@@ -7172,6 +7225,7 @@ function showSharedUnavailable(message) {
   sharedEventSource?.close();
   sharedEventSource = null;
   sharedSession = null;
+  finishSharedGuestLoadingMode();
   resetPages();
   let overlay = document.querySelector(".share-unavailable");
   if (!overlay) {
@@ -7773,6 +7827,10 @@ function saveAnnotations() {
   if (!currentDocumentKey) return;
 
   const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
+  if (currentDocumentKey.startsWith("share:")) {
+    scheduleSharedAnnotationSync();
+    return;
+  }
   try {
     localStorage.setItem(lastDocumentKey, currentDocumentKey);
     localStorage.setItem(`${storagePrefix}${currentDocumentKey}`, JSON.stringify(snapshot));

@@ -55,6 +55,15 @@ test("share sessions upload, stream state, and delete expired files", { timeout:
     assert.equal(upload.status, 201);
     assert.deepEqual(Buffer.from(await (await fetch(`${origin}/api/share-sessions/${first.id}/file`)).arrayBuffer()), uploadBytes);
     assert.deepEqual(await readFile(join(storageRoot, first.id, "source.bin")), uploadBytes);
+    const head = await fetch(`${origin}/api/share-sessions/${first.id}/file`, { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("accept-ranges"), "bytes");
+    assert.equal(head.headers.get("content-length"), String(uploadBytes.length));
+    const partial = await fetch(`${origin}/api/share-sessions/${first.id}/file`, { headers: { Range: "bytes=1-3" } });
+    assert.equal(partial.status, 206);
+    assert.equal(partial.headers.get("content-range"), `bytes 1-3/${uploadBytes.length}`);
+    assert.deepEqual(Buffer.from(await partial.arrayBuffer()), uploadBytes.subarray(1, 4));
+    assert.equal((await fetch(`${origin}/api/share-sessions/${first.id}/file`, { headers: { Range: "bytes=99-100" } })).status, 416);
 
     const abort = new AbortController();
     const stream = await fetch(`${origin}/api/share-sessions/${first.id}/events?clientId=client-alpha&role=host&name=Host`, { signal: abort.signal });

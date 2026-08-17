@@ -22,6 +22,40 @@
 }
 
 /* Live sharing */
+.share-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 66;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  background: var(--canvas-bg);
+  color: var(--text);
+  padding: 30px;
+  text-align: center;
+}
+
+.share-loading > span:last-child {
+  max-width: 460px;
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.share-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: share-loading-spin 0.8s linear infinite;
+}
+
+@keyframes share-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 .share-link-overlay {
   position: fixed;
   inset: 0;
@@ -252,6 +286,10 @@
 .share-guest-mode #mobileFileBtn,
 .share-guest-mode #dropzone,
 .share-guest-mode #documentList {
+  display: none;
+}
+
+.video-page .page-delete {
   display: none;
 }
 
