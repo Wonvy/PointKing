@@ -1,0 +1,25 @@
+[Unit]
+Description=PointKing live review service
+After=network.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/www/server/pointking-app
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=18081
+Environment=SHARE_STORAGE_DIR=/www/wwwroot/pointking-live-data
+Environment=SHARE_TTL_MS=86400000
+Environment=SHARE_CLEANUP_INTERVAL_MS=300000
+Environment=SHARE_MAX_UPLOAD_BYTES=524288000
+ExecStart=/www/server/nvm/versions/node/v14.21.2/bin/node /www/server/pointking-app/server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -78,6 +78,26 @@ const translations = {
     exportHtmlHint: "\u9884\u89c8\u5bfc\u51fa\u9875\u9762\uff0c\u786e\u8ba4\u540e\u4e0b\u8f7d HTML \u6587\u4ef6\u3002",
     downloadHtml: "\u4e0b\u8f7d HTML",
     exportImage: "\u5bfc\u51fa\u56fe\u7247",
+    createShareLink: "\u521b\u5efa\u5206\u4eab\u94fe\u63a5",
+    shareCreating: "\u6b63\u5728\u521b\u5efa\u2026",
+    shareUploading: "\u6b63\u5728\u4e0a\u4f20\u2026",
+    shareReady: "\u5b9e\u65f6\u5206\u4eab",
+    shareFailed: "\u521b\u5efa\u5206\u4eab\u94fe\u63a5\u5931\u8d25",
+    shareNoDocument: "\u8bf7\u5148\u6253\u5f00\u4e00\u4e2a\u6587\u4ef6\u6216\u753b\u5e03",
+    shareDialogTitle: "\u5b9e\u65f6\u5206\u4eab\u94fe\u63a5",
+    shareDialogHint: "\u53d1\u9001\u8fd9\u4e2a\u552f\u4e00\u94fe\u63a5\u3002\u6253\u5f00\u540e\u53ef\u540c\u6b65\u9f20\u6807\u3001\u7f29\u653e\u3001\u6279\u6ce8\u548c\u89c6\u9891\u8fdb\u5ea6\u3002",
+    shareLinkLabel: "\u5206\u4eab\u94fe\u63a5",
+    copyShareLink: "\u590d\u5236\u94fe\u63a5",
+    shareCopied: "\u5df2\u590d\u5236",
+    openShareLink: "\u6253\u5f00\u94fe\u63a5",
+    shareExpires: "\u4e0a\u4f20\u7684\u6587\u4ef6\u548c\u94fe\u63a5\u5c06\u5728 24 \u5c0f\u65f6\u540e\u81ea\u52a8\u5220\u9664",
+    shareExpired: "\u8fd9\u4e2a\u5206\u4eab\u94fe\u63a5\u5df2\u8fc7\u671f",
+    shareLoadFailed: "\u65e0\u6cd5\u6253\u5f00\u8fd9\u4e2a\u5206\u4eab\u94fe\u63a5",
+    shareConnecting: "\u6b63\u5728\u8fde\u63a5",
+    shareOnline: "\u5b9e\u65f6\u5206\u4eab",
+    shareReconnecting: "\u6b63\u5728\u91cd\u8fde",
+    shareParticipants: "${count} \u4eba\u5728\u7ebf",
+    shareGuestActivity: "${name} \u6b63\u5728\u64cd\u4f5c",
     exportImageTitle: "\u5bfc\u51fa\u56fe\u7247",
     exportImageHint: "\u70b9\u51fb\u9884\u89c8\u6216\u6309\u94ae\u4e0b\u8f7d\u5230\u672c\u5730\u3002",
     exportImageEmpty: "\u6ca1\u6709\u53ef\u5bfc\u51fa\u7684\u9875\u9762",
@@ -164,6 +184,26 @@ const translations = {
     exportHtmlHint: "Preview the export page, then download the HTML file.",
     downloadHtml: "Download HTML",
     exportImage: "Export image",
+    createShareLink: "Create share link",
+    shareCreating: "Creating...",
+    shareUploading: "Uploading...",
+    shareReady: "Live share",
+    shareFailed: "Could not create the share link",
+    shareNoDocument: "Open a file or board first",
+    shareDialogTitle: "Live share link",
+    shareDialogHint: "Send this unique link. Anyone who opens it can sync the pointer, zoom, annotations, and video position.",
+    shareLinkLabel: "Share link",
+    copyShareLink: "Copy link",
+    shareCopied: "Copied",
+    openShareLink: "Open link",
+    shareExpires: "The uploaded file and link are deleted automatically after 24 hours",
+    shareExpired: "This share link has expired",
+    shareLoadFailed: "Could not open this share link",
+    shareConnecting: "Connecting",
+    shareOnline: "Live share",
+    shareReconnecting: "Reconnecting",
+    shareParticipants: "${count} online",
+    shareGuestActivity: "${name} is interacting",
     exportImageTitle: "Export image",
     exportImageHint: "Click a preview or button to download it locally.",
     exportImageEmpty: "No page available to export",
@@ -324,6 +364,20 @@ const pendingRegionPreviewIds = new Set();
 const pendingVideoRegionPreviewIds = new Set();
 const collapsedCommentGroups = new Set();
 const activeCanvasPointers = new Map();
+const sharedRemoteCursors = new Map();
+
+const sharedClientId = createSharedClientId();
+let sharedSession = null;
+let sharedEventSource = null;
+let sharedApplyingRemote = false;
+let sharedAnnotationTimer = null;
+let sharedViewTimer = null;
+let sharedVideoTimer = null;
+let sharedCursorLastSentAt = 0;
+let sharedEventQueue = Promise.resolve();
+let sharedLastVideoFingerprint = "";
+let sharedActivityTimer = null;
+let sharedRemoteVideoUntil = 0;
 
 pdfjs.GlobalWorkerOptions.workerSrc =
   "./vendor/pdfjs/pdf.worker.min.mjs";
@@ -333,7 +387,7 @@ applyTheme();
 applyLanguage();
 restoreLayout();
 centerCanvas();
-initializeDocument();
+initializeApplicationDocument();
 bindResizeHandle(leftResizeHandle, "left");
 bindResizeHandle(rightResizeHandle, "right");
 bindCollapseButton(leftCollapseBtn, "left");
@@ -1727,6 +1781,7 @@ function applyCanvasTransform() {
   zoomReadout.textContent = zoomText;
   statusZoom.textContent = zoomText;
   syncMobileZoomSlider();
+  scheduleSharedViewSync();
 }
 
 function syncMobileZoomSlider() {
@@ -1934,7 +1989,7 @@ function getExportMenu() {
 
 function toggleExportMenu() {
   const menu = getExportMenu();
-  const menuWidth = 146;
+  const menuWidth = 174;
   const open = !menu.classList.contains("open");
   if (!open) {
     hideExportMenu();
@@ -1942,6 +1997,7 @@ function toggleExportMenu() {
   }
 
   menu.replaceChildren(
+    createExportMenuItem("link-2", t("createShareLink"), createOrShowShareLink),
     createExportMenuItem("file-code", t("exportHtml"), runStaticExport),
     createExportMenuItem("image", t("exportImage"), openExportImagePreview),
   );
@@ -5215,7 +5271,7 @@ function createStaticVideoBoardHtml(payload) {
 <title>${escapeHtml(payload.title)} - PointKing</title>
 <style>
 :root{color-scheme:dark;--bg:#08090c;--panel:#101116;--panel-2:#151720;--line:rgba(255,255,255,.1);--text:#f5f5f7;--muted:#8f96a3;--accent:#00c2a8;--blue:#6e7cff;--danger:#ff6b6b}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:14px}.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:8;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.video-shell{display:grid;gap:10px;width:min(980px,100%);margin:0 auto}.video-name{display:inline-flex;justify-self:start;max-width:100%;height:22px;align-items:center;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);padding:0 8px;font-size:11px;font-weight:750}.video-frame{position:relative;overflow:hidden;background:#000}.video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.layer{position:absolute;inset:0;pointer-events:none}.mark,.dot-wrap{position:absolute;z-index:3;--c:var(--accent);pointer-events:auto}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.mark.active,.dot-wrap.active,.mark.playback-active,.dot-wrap.playback-active{z-index:4;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c) 62%,transparent))}.dot{display:block;width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.avatar{position:absolute;left:0;top:0;display:grid;width:20px;height:20px;place-items:center;border:2px solid #fff;border-radius:999px;background:var(--c);color:#fff;font-size:11px;font-weight:800;transform:translate(-50%,-50%)}.tip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tip,.dot-wrap:hover .tip{display:block}.missing{position:absolute;inset:0;z-index:6;display:none;place-items:center;background:rgba(0,0,0,.74);padding:24px;text-align:center}.missing.show{display:grid}.missing-card{display:grid;gap:10px;max-width:420px;border:1px solid var(--line);border-radius:10px;background:rgba(16,17,22,.96);padding:18px}.missing-card strong{font-size:15px}.missing-card span{color:var(--muted);font-size:12px;line-height:1.55}.missing-card label{display:inline-flex;justify-content:center;align-items:center;height:34px;border-radius:7px;background:var(--blue);color:#fff;font-size:12px;font-weight:700;cursor:pointer}.missing-card input{display:none}.controls{display:grid;gap:10px;border:1px solid var(--line);border-radius:8px;background:rgba(18,20,29,.9);padding:10px}.control-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}.time{color:#d8dce6;font-size:12px}.play{display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.04);color:var(--text);font-size:14px;cursor:pointer}.play:hover{border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.08)}.timeline-wrap{position:relative;height:18px}.timeline{position:absolute;inset:0;width:100%;height:18px;margin:0;accent-color:#d6dae3;background:transparent}.timeline::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:#8a8f99}.timeline::-webkit-slider-thumb{width:14px;height:14px;margin-top:-5px;border:2px solid #fff;border-radius:99px;background:#d6dae3}.markers{position:absolute;inset:0;pointer-events:none}.marker{position:absolute;top:50%;display:grid;width:14px;height:14px;place-items:center;border:2px solid rgba(255,255,255,.72);border-radius:999px;background:var(--c);color:#fff;font-size:0;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer}.marker:hover,.marker.active,.marker.playback-active{box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 24%,transparent);border-color:#fff}.wave{display:block;width:100%;height:54px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2)}.side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;border-left:1px solid var(--line);background:var(--panel);overflow:hidden}.side-head{position:sticky;top:0;z-index:5;display:grid;gap:10px;border-bottom:1px solid var(--line);background:var(--panel);padding:16px}.side-title,.group-title,.card-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.filter{height:28px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:12px}.filter.active,.filter:hover{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--text)}.comment-scroll{min-height:0;overflow:auto;padding:16px}.side h2{margin:0;font-size:14px}.count,.card-title span{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group[hidden],.card[hidden]{display:none}.group-title{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{position:relative;display:grid;grid-template-columns:minmax(0,1fr)86px;gap:10px;padding:10px 10px 10px 38px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active,.card.playback-active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.card .num{position:absolute;left:12px;top:12px;display:grid;width:18px;height:18px;place-items:center;border-radius:999px;background:var(--c);color:#fff;font-size:10px;font-weight:800}.card strong{font-size:12px}.card p{grid-column:1;margin:4px 0 0;color:#f5f5f7;font-size:13px;font-weight:650;line-height:1.45}.thumb{grid-column:2;grid-row:1 / span 2;width:86px;height:52px;object-fit:cover;border:1px solid var(--line);border-radius:4px;background:#000}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:"Microsoft YaHei",Arial,sans-serif;font-size:14px}.shell{display:grid;grid-template-columns:minmax(0,1fr)340px;height:100vh;overflow:hidden}.stage{overflow:auto;padding:28px;background:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),#090a10;background-size:32px 32px}.top{position:sticky;top:0;z-index:8;display:flex;align-items:center;justify-content:space-between;margin:-28px -28px 24px;padding:14px 20px;border-bottom:1px solid var(--line);background:rgba(8,9,12,.9);backdrop-filter:blur(16px)}h1{margin:0;font-size:14px}.meta{color:var(--muted);font-size:12px}.video-shell{display:grid;gap:10px;width:min(980px,100%);margin:0 auto}.video-name{display:inline-flex;justify-self:start;max-width:100%;height:22px;align-items:center;border:1px solid var(--line);border-radius:6px;background:rgba(16,17,22,.94);color:var(--muted);padding:0 8px;font-size:11px;font-weight:750}.video-frame{position:relative;overflow:hidden;background:#000}.video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.layer{position:absolute;inset:0;pointer-events:none}.mark,.dot-wrap{position:absolute;z-index:3;--c:var(--accent);pointer-events:auto}.mark{border:2px solid var(--c);background:transparent}.mark.delete{background:color-mix(in srgb,var(--c) 16%,transparent)}.mark.active,.dot-wrap.active,.mark.playback-active,.dot-wrap.playback-active{z-index:4;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c) 62%,transparent))}.mark.active{background:rgba(255,255,255,.1);background:color-mix(in srgb,var(--c) 14%,transparent)}.dot{display:block;width:14px;height:14px;border:2px solid #fff;border-radius:99px;background:var(--c);transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.3)}.avatar{position:absolute;left:0;top:0;display:grid;width:20px;height:20px;place-items:center;border:2px solid #fff;border-radius:999px;background:var(--c);color:#fff;font-size:11px;font-weight:800;transform:translate(-50%,-50%)}.tip{position:absolute;left:50%;bottom:calc(100% + 8px);display:none;max-width:230px;transform:translateX(-50%);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(16,17,22,.96);box-shadow:0 12px 32px rgba(0,0,0,.3);color:var(--text);font-size:12px;line-height:1.45}.mark:hover .tip,.dot-wrap:hover .tip{display:block}.missing{position:absolute;inset:0;z-index:6;display:none;place-items:center;background:rgba(0,0,0,.74);padding:24px;text-align:center}.missing.show{display:grid}.missing-card{display:grid;gap:10px;max-width:420px;border:1px solid var(--line);border-radius:10px;background:rgba(16,17,22,.96);padding:18px}.missing-card strong{font-size:15px}.missing-card span{color:var(--muted);font-size:12px;line-height:1.55}.missing-card label{display:inline-flex;justify-content:center;align-items:center;height:34px;border-radius:7px;background:var(--blue);color:#fff;font-size:12px;font-weight:700;cursor:pointer}.missing-card input{display:none}.controls{display:grid;gap:10px;border:1px solid var(--line);border-radius:8px;background:rgba(18,20,29,.9);padding:10px}.control-top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}.time{color:#d8dce6;font-size:12px}.play{display:grid;width:34px;height:34px;place-items:center;border:1px solid rgba(255,255,255,.22);border-radius:8px;background:rgba(255,255,255,.04);color:var(--text);font-size:14px;cursor:pointer}.play:hover{border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.08)}.timeline-wrap{position:relative;height:18px}.timeline{position:absolute;inset:0;width:100%;height:18px;margin:0;accent-color:#d6dae3;background:transparent}.timeline::-webkit-slider-runnable-track{height:4px;border-radius:99px;background:#8a8f99}.timeline::-webkit-slider-thumb{width:14px;height:14px;margin-top:-5px;border:2px solid #fff;border-radius:99px;background:#d6dae3}.markers{position:absolute;inset:0;pointer-events:none}.marker{position:absolute;top:50%;display:grid;width:14px;height:14px;place-items:center;border:2px solid rgba(255,255,255,.72);border-radius:999px;background:var(--c);color:#fff;font-size:0;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer}.marker:hover,.marker.active,.marker.playback-active{box-shadow:0 0 0 4px color-mix(in srgb,var(--c) 24%,transparent);border-color:#fff}.wave{display:block;width:100%;height:54px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2)}.side{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;border-left:1px solid var(--line);background:var(--panel);overflow:hidden}.side-head{position:sticky;top:0;z-index:5;display:grid;gap:10px;border-bottom:1px solid var(--line);background:var(--panel);padding:16px}.side-title,.group-title,.card-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.filter{height:28px;border:1px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);font-size:12px}.filter.active,.filter:hover{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--text)}.comment-scroll{min-height:0;overflow:auto;padding:16px}.side h2{margin:0;font-size:14px}.count,.card-title span{color:var(--muted);font-size:12px}.group{display:grid;gap:8px;margin-bottom:12px}.group[hidden],.card[hidden]{display:none}.group-title{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);font-weight:700;font-size:12px}.card{position:relative;display:grid;grid-template-columns:minmax(0,1fr)86px;gap:10px;padding:10px 10px 10px 38px;border:1px solid var(--line);border-left:2px solid var(--c);border-radius:8px;background:rgba(255,255,255,.025);cursor:pointer}.card:hover,.card.active,.card.playback-active{background:color-mix(in srgb,var(--c) 14%,transparent);border-color:color-mix(in srgb,var(--c) 58%,var(--line))}.card .num{position:absolute;left:12px;top:12px;display:grid;width:18px;height:18px;place-items:center;border-radius:999px;background:var(--c);color:#fff;font-size:10px;font-weight:800}.card strong{font-size:12px}.card p{grid-column:1;margin:4px 0 0;color:#f5f5f7;font-size:13px;font-weight:650;line-height:1.45}.thumb{grid-column:2;grid-row:1 / span 2;width:86px;height:52px;object-fit:cover;border:1px solid var(--line);border-radius:4px;background:#000}.preview{position:fixed;z-index:20;display:none;max-width:min(520px,80vw);max-height:70vh;border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.5);padding:6px}.preview.open{display:block}.preview img{display:block;max-width:100%;max-height:calc(70vh - 12px);border-radius:5px}@media(max-width:900px){.shell{grid-template-columns:1fr}.side{height:42vh;border-left:0;border-top:1px solid var(--line)}}
 </style>
 </head>
 <body>
@@ -5257,8 +5313,8 @@ annotations.forEach(a=>{const m=document.createElement("button");m.className="ma
 const groups=new Map();annotations.forEach(a=>{const key=data.video?.name||data.title;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(a)});count.textContent=annotations.length;[...groups.entries()].forEach(([name,items])=>{const g=document.createElement("section");g.className="group";g.innerHTML='<div class="group-title"><span>'+esc(name)+'</span><span>'+items.length+'</span></div>';items.forEach(a=>{const card=document.createElement("article");card.className="card";card.dataset.id=a.id;card.dataset.intent=a.intent||"suggestion";card.style.setProperty("--c",color(a));card.innerHTML='<span class="num">'+esc(a.renderIndex||"")+'</span><div><div class="card-title"><strong>'+esc(a.intentLabel)+'</strong><span>'+fmt(a.videoTime)+'</span></div><p>'+esc(text(a))+'</p></div>'+(a.regionImage?'<img class="thumb" src="'+a.regionImage+'" alt="">':"");card.addEventListener("click",()=>{video.pause();video.currentTime=a.videoTime;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");sync()});g.append(card)});comments.append(g)});
 function setActive(id,on){document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
 document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));
-document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,true);const img=e.target.closest(".thumb");if(img){previewImg.src=img.src;preview.classList.add("open")}});
-document.addEventListener("mouseout",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,false);if(e.target.closest(".thumb"))preview.classList.remove("open")});
+document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked&&!linked.contains(e.relatedTarget))setActive(linked.dataset.id,true);const img=e.target.closest(".thumb");if(img&&!img.contains(e.relatedTarget)){previewImg.src=img.src;preview.classList.add("open")}});
+document.addEventListener("mouseout",e=>{const linked=e.target.closest("[data-id]");if(linked&&!linked.contains(e.relatedTarget))setActive(linked.dataset.id,false);const img=e.target.closest(".thumb");if(img&&!img.contains(e.relatedTarget))preview.classList.remove("open")});
 document.addEventListener("mousemove",e=>{if(!preview.classList.contains("open"))return;preview.style.left=Math.min(innerWidth-540,e.clientX+14)+"px";preview.style.top=Math.max(12,Math.min(innerHeight-360,e.clientY+14))+"px"});
 function drawShape(ctx,samples,o){const n=Math.max(1,Math.floor(o.w));const vals=Array.from({length:n},(_,i)=>{const s=i/Math.max(1,n-1)*Math.max(0,samples.length-1),l=Math.floor(s),r=Math.min(samples.length-1,l+1),mix=s-l;return clamp((Number(samples[l])||0)*(1-mix)+(Number(samples[r])||0)*mix,0,1)});ctx.save();ctx.globalAlpha=o.a;ctx.fillStyle=o.c;ctx.beginPath();ctx.moveTo(o.x,o.y);vals.forEach((v,i)=>{const p=vals[Math.max(0,i-1)],nx=vals[Math.min(vals.length-1,i+1)],amp=Math.max(1,(p+v*2+nx)/4*o.h);ctx.lineTo(o.x+i,o.y-amp)});for(let i=vals.length-1;i>=0;i--){const p=vals[Math.max(0,i-1)],nx=vals[Math.min(vals.length-1,i+1)],amp=Math.max(1,(p+vals[i]*2+nx)/4*o.h);ctx.lineTo(o.x+i,o.y+amp)}ctx.closePath();ctx.fill();ctx.restore()}
 function drawWave(){const r=wave.getBoundingClientRect(),dpr=devicePixelRatio||1,w=Math.max(320,Math.round((r.width||720)*dpr)),h=Math.max(38,Math.round((r.height||54)*dpr));if(wave.width!==w)wave.width=w;if(wave.height!==h)wave.height=h;const ctx=wave.getContext("2d");ctx.clearRect(0,0,w,h);ctx.fillStyle="#151720";ctx.fillRect(0,0,w,h);const samples=data.video?.waveform?.length?data.video.waveform:Array.from({length:96},(_,i)=>.08+Math.sin(i*.65)*.025),inset=Math.round(9*dpr),dw=Math.max(1,w-inset*2),center=h/2,wh=Math.max(2,center-Math.round(7*dpr)),p=duration()?clamp(current()/duration(),0,1):0;ctx.fillStyle="rgba(255,255,255,.12)";ctx.fillRect(inset,Math.round(center),dw,Math.max(1,dpr));drawShape(ctx,samples,{x:inset,y:center,w:dw,h:wh,c:"rgba(136,142,155,.42)",a:1});ctx.save();ctx.beginPath();ctx.rect(inset,0,dw*p,h);ctx.clip();drawShape(ctx,samples,{x:inset,y:center,w:dw,h:wh,c:"#00c2a8",a:.95});ctx.restore();ctx.fillStyle="rgba(255,255,255,.88)";ctx.fillRect(Math.round(inset+dw*p)-1,0,2,h)}
@@ -5303,8 +5359,8 @@ const groups=new Map();data.annotations.forEach(a=>{if(!groups.has(String(a.page
 function setActive(id,on){if(!id)return;document.body.classList.toggle("mask-active",on);document.querySelectorAll('[data-id="'+CSS.escape(id)+'"]').forEach(el=>el.classList.toggle("active",on))}
 document.querySelectorAll(".filter").forEach(btn=>btn.addEventListener("click",()=>{const f=btn.dataset.filter;document.querySelectorAll(".filter").forEach(b=>b.classList.toggle("active",b===btn));document.querySelectorAll(".card").forEach(c=>{c.hidden=f!=="all"&&c.dataset.intent!==f});document.querySelectorAll(".group").forEach(g=>{g.hidden=!g.querySelector(".card:not([hidden])")})}));
 comments.addEventListener("click",e=>{const card=e.target.closest(".card");if(!card)return;document.querySelectorAll(".card.active").forEach(c=>c.classList.remove("active"));card.classList.add("active");const mark=document.querySelector('.page [data-id="'+CSS.escape(card.dataset.id)+'"]');mark?.scrollIntoView({block:"center",inline:"center",behavior:"smooth"})});
-document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,true)});
-document.addEventListener("mouseout",e=>{const linked=e.target.closest("[data-id]");if(linked)setActive(linked.dataset.id,false)});
+document.addEventListener("mouseover",e=>{const linked=e.target.closest("[data-id]");if(linked&&!linked.contains(e.relatedTarget))setActive(linked.dataset.id,true)});
+document.addEventListener("mouseout",e=>{const linked=e.target.closest("[data-id]");if(linked&&!linked.contains(e.relatedTarget))setActive(linked.dataset.id,false)});
 document.addEventListener("mouseover",e=>{const img=e.target.closest(".thumb,.refs img");if(!img)return;previewImg.src=img.src;preview.classList.add("open")});
 document.addEventListener("mousemove",e=>{if(!preview.classList.contains("open"))return;preview.style.left=Math.min(innerWidth-540,e.clientX+14)+"px";preview.style.top=Math.max(12,Math.min(innerHeight-360,e.clientY+14))+"px"});
 document.addEventListener("mouseout",e=>{if(e.target.closest(".thumb,.refs img"))preview.classList.remove("open")});
@@ -5502,27 +5558,35 @@ function highlightAnnotation(annotationId) {
 
 async function loadFile(file, options = {}) {
   const shouldStoreFile = options.store !== false;
+  const shouldCatalogFile = options.catalog !== false;
+  const shouldPersistSelection = options.persistSelection !== false;
+  const shouldRestoreAnnotations = options.restoreAnnotations !== false;
   cleanupCurrentVideo();
-  currentDocumentKey = getDocumentKey(file);
-  deletedPageIds = await readDeletedPageIds(currentDocumentKey);
-  try {
-    localStorage.setItem(lastDocumentKey, currentDocumentKey);
-  } catch {}
+  currentDocumentKey = options.documentKey || getDocumentKey(file);
+  deletedPageIds = shouldRestoreAnnotations ? await readDeletedPageIds(currentDocumentKey) : new Set();
+  if (shouldPersistSelection) {
+    try {
+      localStorage.setItem(lastDocumentKey, currentDocumentKey);
+    } catch {}
+  }
   if (shouldStoreFile) await storeDocumentFile(currentDocumentKey, file).catch(() => {});
-  upsertDocumentRecord({
-    key: currentDocumentKey,
-    kind: "file",
-    name: file.name,
-    type: file.type,
-    size: file.size,
-    lastModified: file.lastModified,
-    updatedAt: Date.now(),
-  });
+  if (shouldCatalogFile) {
+    upsertDocumentRecord({
+      key: currentDocumentKey,
+      kind: "file",
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      lastModified: file.lastModified,
+      updatedAt: Date.now(),
+    });
+  }
   docTitle.textContent = t("appTitle");
   fileName.textContent = file.name;
   statusFileName.textContent = file.name;
   setFileMetaText(`${formatBytes(file.size)} \u00b7 \u672c\u5730\u9884\u89c8`);
-  await restoreAnnotationsForCurrentDocument();
+  if (shouldRestoreAnnotations) await restoreAnnotationsForCurrentDocument();
+  else annotations = [];
   resetPages();
 
   if (file.type.startsWith("image/")) {
@@ -5532,7 +5596,7 @@ async function loadFile(file, options = {}) {
     updateCurrentDocumentThumbnail();
     if (!hasDocumentPages()) renderEmptyDocumentState();
     activateMobileAnnotationTool();
-    renderDocumentList();
+    if (shouldCatalogFile) renderDocumentList();
     return;
   }
 
@@ -5543,7 +5607,7 @@ async function loadFile(file, options = {}) {
     updateCurrentDocumentThumbnail();
     if (!hasDocumentPages()) renderEmptyDocumentState();
     activateMobileAnnotationTool();
-    renderDocumentList();
+    if (shouldCatalogFile) renderDocumentList();
     return;
   }
 
@@ -5551,7 +5615,7 @@ async function loadFile(file, options = {}) {
     await renderVideo(file);
     updateCurrentDocumentThumbnail();
     activateMobileAnnotationTool();
-    renderDocumentList();
+    if (shouldCatalogFile) renderDocumentList();
   }
 }
 
@@ -6043,6 +6107,7 @@ function updateVideoControls() {
   syncVideoPlaybackActiveAnnotation();
   drawVideoWaveformProgress();
   if (iconChanged || muteIconChanged) renderLucideIcons();
+  scheduleSharedVideoSync();
 }
 
 function updateVideoTimelineZoom(keepPlayheadVisible = false) {
@@ -6569,6 +6634,561 @@ async function initializeDocument() {
 
   await createNewBlankDocument();
 }
+
+async function initializeApplicationDocument() {
+  const shareId = getSharedSessionIdFromLocation();
+  if (!shareId) {
+    await initializeDocument();
+    return;
+  }
+
+  try {
+    await loadSharedSession(shareId);
+  } catch (error) {
+    console.error("Unable to open shared PointKing session", error);
+    showSharedUnavailable(error?.code === "share_expired" ? t("shareExpired") : t("shareLoadFailed"));
+  }
+}
+
+function getSharedSessionIdFromLocation() {
+  const match = location.pathname.match(/(?:^|\/)share\/([A-Za-z0-9_-]{20,64})\/?$/);
+  return match?.[1] || new URLSearchParams(location.search).get("share") || "";
+}
+
+function createSharedClientId() {
+  const bytes = new Uint8Array(12);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  const random = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `pk-${random || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+}
+
+async function createOrShowShareLink() {
+  if (sharedSession?.role === "host" && sharedSession.shareUrl && sharedSession.expiresAt > Date.now()) {
+    showShareLinkDialog(sharedSession);
+    return;
+  }
+  if (!currentDocumentKey || !hasDocumentPages()) {
+    showAnnotationNotice(t("shareNoDocument"));
+    return;
+  }
+
+  setShareText(t("shareCreating"));
+  try {
+    const storedRecord = await readDocumentFile(currentDocumentKey).catch(() => null);
+    const sourceFile = createRestoredDocumentFile(storedRecord);
+    const state = await createInitialSharedState(sourceFile);
+    const response = await fetch("api/share-sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: statusFileName.textContent || fileName.textContent || t("appTitle"),
+        file: sourceFile ? {
+          name: sourceFile.name,
+          type: sourceFile.type,
+          size: sourceFile.size,
+          lastModified: sourceFile.lastModified,
+        } : null,
+        state,
+      }),
+    });
+    if (!response.ok) throw new Error(`Share session request failed (${response.status})`);
+    let session = await response.json();
+
+    if (sourceFile) {
+      setShareText(t("shareUploading"));
+      const upload = await fetch(`api/share-sessions/${encodeURIComponent(session.id)}/file`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": sourceFile.type || "application/octet-stream",
+          "X-File-Name": encodeURIComponent(sourceFile.name),
+          "X-File-Last-Modified": String(sourceFile.lastModified || Date.now()),
+        },
+        body: sourceFile,
+      });
+      if (!upload.ok) throw new Error(`Share upload failed (${upload.status})`);
+      const uploaded = await upload.json();
+      session = { ...session, file: uploaded.file };
+    }
+
+    session.shareUrl = new URL(`share/${session.id}`, document.baseURI).href;
+    activateSharedSession(session, "host");
+    showShareLinkDialog(sharedSession);
+    setShareText(t("shareReady"));
+  } catch (error) {
+    console.error("Unable to create share link", error);
+    setShareText(t("shareFailed"));
+    showAnnotationNotice(t("shareFailed"));
+  }
+  setTimeout(() => setShareText(sharedSession ? t("shareReady") : t("share")), 1800);
+}
+
+async function createInitialSharedState(sourceFile) {
+  const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
+  return {
+    annotations: snapshot,
+    deletedPageIds: [...deletedPageIds],
+    pages: sourceFile ? [] : captureSharedPageSnapshots(),
+    view: getCurrentSharedView(),
+    video: getCurrentSharedVideoState(),
+  };
+}
+
+function captureSharedPageSnapshots() {
+  return [...pageStack.querySelectorAll(".doc-page")].map((page, index) => {
+    const canvas = page.querySelector("canvas");
+    if (!canvas?.width || !canvas?.height) return null;
+    return {
+      id: page.dataset.pageId || String(index + 1),
+      name: `page-${index + 1}.png`,
+      type: "image/png",
+      image: canvas.toDataURL("image/png"),
+    };
+  }).filter(Boolean);
+}
+
+function getCurrentSharedView() {
+  return { zoom, panX: pan.x, panY: pan.y };
+}
+
+function getCurrentSharedVideoState() {
+  const video = currentVideo?.video;
+  return {
+    currentTime: Number.isFinite(video?.currentTime) ? video.currentTime : 0,
+    paused: video ? video.paused : true,
+    playbackRate: video?.playbackRate || 1,
+  };
+}
+
+async function loadSharedSession(id) {
+  const response = await fetch(`api/share-sessions/${encodeURIComponent(id)}`, { cache: "no-store" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const error = new Error(payload.error || `Share request failed (${response.status})`);
+    error.code = payload.error;
+    throw error;
+  }
+  const session = await response.json();
+  if (session.file?.uploaded) await loadSharedSourceFile(session);
+  else if (session.state?.pages?.length) await loadSharedPageSnapshots(session);
+  else throw new Error("The shared document has no source file or page snapshots");
+
+  applySharedState(session.state || {});
+  session.shareUrl = location.href;
+  activateSharedSession(session, "guest");
+  document.body.classList.add("share-guest-mode");
+}
+
+async function loadSharedSourceFile(session) {
+  const response = await fetch(`api/share-sessions/${encodeURIComponent(session.id)}/file`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Shared file request failed (${response.status})`);
+  const blob = await response.blob();
+  const file = new File([blob], session.file.name || "shared-document", {
+    type: session.file.type || blob.type || "application/octet-stream",
+    lastModified: session.file.lastModified || session.createdAt || Date.now(),
+  });
+  await loadFile(file, {
+    store: false,
+    catalog: false,
+    persistSelection: false,
+    restoreAnnotations: false,
+    documentKey: `share:${session.id}`,
+  });
+}
+
+async function loadSharedPageSnapshots(session) {
+  const pages = session.state.pages;
+  const firstFile = await sharedPageToFile(pages[0]);
+  await loadFile(firstFile, {
+    store: false,
+    catalog: false,
+    persistSelection: false,
+    restoreAnnotations: false,
+    documentKey: `share:${session.id}`,
+  });
+  setRenderedPageId(pageStack.querySelector(".doc-page"), pages[0].id);
+  for (const page of pages.slice(1)) {
+    await appendImagePage(await sharedPageToFile(page), { pageId: page.id, focus: false });
+  }
+  fileName.textContent = session.title || t("blankDocument");
+  statusFileName.textContent = fileName.textContent;
+  setFileMetaText(`${pages.length} pages · ${t("shareReady")}`);
+}
+
+async function sharedPageToFile(page) {
+  const response = await fetch(page.image);
+  const blob = await response.blob();
+  return new File([blob], page.name || "page.png", { type: page.type || blob.type || "image/png" });
+}
+
+function setRenderedPageId(page, pageId) {
+  if (!page) return;
+  page.dataset.pageId = String(pageId);
+  const badge = page.querySelector(".page-badge span");
+  if (badge) badge.textContent = `Page ${pageId}`;
+}
+
+function applySharedState(state) {
+  sharedApplyingRemote = true;
+  try {
+    deletedPageIds = new Set((state.deletedPageIds || []).map(String));
+    removeSharedDeletedPages();
+    annotations = (state.annotations || []).filter(isSupportedAnnotation).map(normalizeAnnotation);
+    renderAnnotations();
+    if (state.view) applyRemoteSharedView(state.view);
+    if (state.video) applyRemoteSharedVideo(state.video);
+  } finally {
+    sharedApplyingRemote = false;
+  }
+}
+
+function removeSharedDeletedPages() {
+  pageStack.querySelectorAll(".doc-page").forEach((page) => {
+    if (deletedPageIds.has(String(page.dataset.pageId))) page.remove();
+  });
+  if (!hasDocumentPages()) renderEmptyDocumentState();
+  updateSurfaceBounds();
+}
+
+function activateSharedSession(session, role) {
+  sharedEventSource?.close();
+  sharedSession = {
+    ...session,
+    role,
+    clientId: sharedClientId,
+    shareUrl: session.shareUrl || new URL(`share/${session.id}`, document.baseURI).href,
+    participants: [],
+  };
+  ensureSharedLiveBadge();
+  updateSharedLiveBadge("connecting");
+  const name = role === "host" ? (currentLanguage === "zh" ? "发起人" : "Host") : (currentLanguage === "zh" ? "访客" : "Guest");
+  const eventUrl = `api/share-sessions/${encodeURIComponent(session.id)}/events?clientId=${encodeURIComponent(sharedClientId)}&role=${role}&name=${encodeURIComponent(name)}`;
+  sharedEventSource = new EventSource(eventUrl);
+  sharedEventSource.addEventListener("open", () => updateSharedLiveBadge("online"));
+  sharedEventSource.addEventListener("message", (event) => {
+    try {
+      handleSharedEvent(JSON.parse(event.data));
+    } catch (error) {
+      console.warn("Ignored invalid shared event", error);
+    }
+  });
+  sharedEventSource.addEventListener("error", () => {
+    if (sharedSession) updateSharedLiveBadge("reconnecting");
+  });
+}
+
+function handleSharedEvent(event) {
+  if (!sharedSession) return;
+  if (event.type === "snapshot") {
+    sharedSession.expiresAt = event.session?.expiresAt || sharedSession.expiresAt;
+    sharedSession.participants = event.participants || [];
+    updateSharedLiveBadge("online");
+    return;
+  }
+  if (event.type === "presence") {
+    sharedSession.participants = event.participants || [];
+    removeAbsentSharedCursors();
+    updateSharedLiveBadge("online");
+    return;
+  }
+  if (event.sender === sharedClientId) return;
+  if (event.type === "cursor") renderSharedRemoteCursor(event.sender, event.payload || {});
+  else if (event.type === "annotations") applyRemoteSharedAnnotations(event.payload || {});
+  else if (event.type === "view") applyRemoteSharedView(event.payload || {});
+  else if (event.type === "video") applyRemoteSharedVideo(event.payload || {});
+  else if (event.type === "activity") showSharedActivity(event.payload?.name || (currentLanguage === "zh" ? "访客" : "Guest"));
+  else if (event.type === "session-expired") showSharedUnavailable(t("shareExpired"));
+}
+
+function applyRemoteSharedAnnotations(payload) {
+  sharedApplyingRemote = true;
+  try {
+    if (Array.isArray(payload.deletedPageIds)) {
+      deletedPageIds = new Set(payload.deletedPageIds.map(String));
+      removeSharedDeletedPages();
+    }
+    annotations = (payload.annotations || []).filter(isSupportedAnnotation).map(normalizeAnnotation);
+    renderAnnotations();
+  } finally {
+    sharedApplyingRemote = false;
+  }
+}
+
+function applyRemoteSharedView(view) {
+  if (!view) return;
+  const wasApplyingRemote = sharedApplyingRemote;
+  sharedApplyingRemote = true;
+  zoom = clamp(Number(view.zoom) || 1, 0.35, 2.6);
+  pan.x = clamp(Number(view.panX) || 0, -100000, 100000);
+  pan.y = clamp(Number(view.panY) || 0, -100000, 100000);
+  applyCanvasTransform();
+  sharedApplyingRemote = wasApplyingRemote;
+}
+
+function applyRemoteSharedVideo(state) {
+  const video = currentVideo?.video;
+  if (!video || !state) return;
+  sharedRemoteVideoUntil = Date.now() + 500;
+  const wasApplyingRemote = sharedApplyingRemote;
+  sharedApplyingRemote = true;
+  if (Number.isFinite(Number(state.currentTime)) && Math.abs(video.currentTime - Number(state.currentTime)) > 0.12) {
+    video.currentTime = Number(state.currentTime);
+  }
+  video.playbackRate = Number(state.playbackRate) || 1;
+  if (state.paused) video.pause();
+  else video.play().catch(() => {});
+  updateVideoControls();
+  sharedApplyingRemote = wasApplyingRemote;
+}
+
+function scheduleSharedAnnotationSync() {
+  if (!sharedSession || sharedApplyingRemote) return;
+  clearTimeout(sharedAnnotationTimer);
+  sharedAnnotationTimer = setTimeout(() => {
+    const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
+    postSharedEvent("annotations", { annotations: snapshot, deletedPageIds: [...deletedPageIds] }, { queued: true });
+    postSharedEvent("activity", { name: sharedSession.role === "host" ? (currentLanguage === "zh" ? "发起人" : "Host") : (currentLanguage === "zh" ? "访客" : "Guest") });
+  }, 100);
+}
+
+function scheduleSharedViewSync() {
+  if (!sharedSession || sharedApplyingRemote) return;
+  clearTimeout(sharedViewTimer);
+  sharedViewTimer = setTimeout(() => postSharedEvent("view", getCurrentSharedView(), { queued: true }), 120);
+}
+
+function scheduleSharedVideoSync() {
+  if (!sharedSession || sharedApplyingRemote || Date.now() < sharedRemoteVideoUntil || !currentVideo?.video) return;
+  const state = getCurrentSharedVideoState();
+  const fingerprint = `${Math.round(state.currentTime * 5)}:${state.paused}:${state.playbackRate}`;
+  if (fingerprint === sharedLastVideoFingerprint) return;
+  sharedLastVideoFingerprint = fingerprint;
+  clearTimeout(sharedVideoTimer);
+  sharedVideoTimer = setTimeout(() => postSharedEvent("video", state, { queued: true }), 180);
+}
+
+function postSharedEvent(type, payload, options = {}) {
+  if (!sharedSession) return Promise.resolve(false);
+  const send = async () => {
+    const response = await fetch(`api/share-sessions/${encodeURIComponent(sharedSession.id)}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, sender: sharedClientId, payload }),
+    });
+    if (response.status === 410) showSharedUnavailable(t("shareExpired"));
+    if (!response.ok) throw new Error(`Shared event failed (${response.status})`);
+    return true;
+  };
+  if (!options.queued) return send().catch((error) => console.warn(error));
+  sharedEventQueue = sharedEventQueue.catch(() => {}).then(send);
+  return sharedEventQueue.catch((error) => {
+    console.warn(error);
+    return false;
+  });
+}
+
+function broadcastSharedCursor(event) {
+  if (!sharedSession || event.pointerType === "touch" || Date.now() - sharedCursorLastSentAt < 55) return;
+  const viewportRect = canvasViewport.getBoundingClientRect();
+  if (event.clientX < viewportRect.left || event.clientX > viewportRect.right || event.clientY < viewportRect.top || event.clientY > viewportRect.bottom) return;
+  sharedCursorLastSentAt = Date.now();
+  const page = event.target.closest?.(".doc-page");
+  let payload;
+  if (page) {
+    const coordinateElement = getPageCoordinateElement(page);
+    const rect = coordinateElement.getBoundingClientRect();
+    payload = {
+      pageId: page.dataset.pageId,
+      x: clamp(((event.clientX - rect.left) / rect.width) * 100, 0, 100),
+      y: clamp(((event.clientY - rect.top) / rect.height) * 100, 0, 100),
+      visible: true,
+    };
+  } else {
+    payload = {
+      viewport: true,
+      x: clamp((event.clientX - viewportRect.left) / viewportRect.width, 0, 1),
+      y: clamp((event.clientY - viewportRect.top) / viewportRect.height, 0, 1),
+      visible: true,
+    };
+  }
+  postSharedEvent("cursor", payload);
+}
+
+function renderSharedRemoteCursor(clientId, payload) {
+  if (!payload.visible) {
+    sharedRemoteCursors.get(clientId)?.remove();
+    sharedRemoteCursors.delete(clientId);
+    return;
+  }
+  let cursor = sharedRemoteCursors.get(clientId);
+  if (!cursor) {
+    cursor = document.createElement("div");
+    cursor.className = "shared-remote-cursor";
+    cursor.dataset.clientId = clientId;
+    cursor.style.setProperty("--cursor-color", getSharedCursorColor(clientId));
+    const pointer = document.createElement("span");
+    pointer.className = "shared-remote-cursor-pointer";
+    const label = document.createElement("span");
+    label.className = "shared-remote-cursor-label";
+    label.textContent = getSharedParticipantName(clientId);
+    cursor.append(pointer, label);
+    sharedRemoteCursors.set(clientId, cursor);
+  }
+
+  if (payload.pageId) {
+    const page = [...pageStack.querySelectorAll(".doc-page")].find((item) => String(item.dataset.pageId) === String(payload.pageId));
+    if (!page) return;
+    if (cursor.parentElement !== page) page.append(cursor);
+    cursor.classList.remove("viewport-cursor");
+    cursor.style.left = `${clamp(Number(payload.x) || 0, 0, 100)}%`;
+    cursor.style.top = `${clamp(Number(payload.y) || 0, 0, 100)}%`;
+  } else if (payload.viewport) {
+    if (cursor.parentElement !== document.body) document.body.append(cursor);
+    cursor.classList.add("viewport-cursor");
+    const rect = canvasViewport.getBoundingClientRect();
+    cursor.style.left = `${rect.left + clamp(Number(payload.x) || 0, 0, 1) * rect.width}px`;
+    cursor.style.top = `${rect.top + clamp(Number(payload.y) || 0, 0, 1) * rect.height}px`;
+  }
+}
+
+function getSharedCursorColor(clientId) {
+  let hash = 0;
+  for (const char of clientId) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  return annotationColors[Math.abs(hash) % annotationColors.length];
+}
+
+function getSharedParticipantName(clientId) {
+  return sharedSession?.participants?.find((participant) => participant.id === clientId)?.name || (currentLanguage === "zh" ? "访客" : "Guest");
+}
+
+function removeAbsentSharedCursors() {
+  const activeIds = new Set((sharedSession?.participants || []).map((participant) => participant.id));
+  for (const [clientId, cursor] of sharedRemoteCursors) {
+    if (!activeIds.has(clientId)) {
+      cursor.remove();
+      sharedRemoteCursors.delete(clientId);
+    }
+  }
+}
+
+function ensureSharedLiveBadge() {
+  let badge = document.querySelector(".share-live-badge");
+  if (badge) return badge;
+  badge = document.createElement("div");
+  badge.className = "share-live-badge";
+  badge.innerHTML = '<span class="share-live-dot"></span><span class="share-live-label"></span><span class="share-live-count"></span>';
+  document.body.append(badge);
+  return badge;
+}
+
+function updateSharedLiveBadge(status) {
+  const badge = ensureSharedLiveBadge();
+  badge.dataset.status = status;
+  const labels = { connecting: "shareConnecting", online: "shareOnline", reconnecting: "shareReconnecting" };
+  badge.querySelector(".share-live-label").textContent = t(labels[status] || "shareOnline");
+  const count = sharedSession?.participants?.length || 1;
+  badge.querySelector(".share-live-count").textContent = t("shareParticipants", { count });
+}
+
+function showSharedActivity(name) {
+  const badge = ensureSharedLiveBadge();
+  const label = badge.querySelector(".share-live-label");
+  clearTimeout(sharedActivityTimer);
+  label.textContent = t("shareGuestActivity", { name });
+  sharedActivityTimer = setTimeout(() => updateSharedLiveBadge("online"), 1600);
+}
+
+function showShareLinkDialog(session) {
+  document.querySelector(".share-link-overlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "share-link-overlay open";
+  const dialog = document.createElement("section");
+  dialog.className = "share-link-dialog";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-label", t("shareDialogTitle"));
+  const title = document.createElement("h2");
+  title.textContent = t("shareDialogTitle");
+  const hint = document.createElement("p");
+  hint.className = "share-link-hint";
+  hint.textContent = t("shareDialogHint");
+  const label = document.createElement("label");
+  label.textContent = t("shareLinkLabel");
+  const input = document.createElement("input");
+  input.className = "share-link-input";
+  input.readOnly = true;
+  input.value = session.shareUrl;
+  label.append(input);
+  const expiry = document.createElement("p");
+  expiry.className = "share-link-expiry";
+  expiry.textContent = `${t("shareExpires")} · ${new Date(session.expiresAt).toLocaleString()}`;
+  const actions = document.createElement("div");
+  actions.className = "share-link-actions";
+  const copy = createShareDialogButton("copy", t("copyShareLink"), "primary");
+  const open = createShareDialogButton("external-link", t("openShareLink"));
+  const close = createShareDialogButton("x", t("closePreview"));
+  copy.addEventListener("click", async () => {
+    await copyShareUrl(session.shareUrl, input);
+    copy.querySelector("span").textContent = t("shareCopied");
+    setTimeout(() => {
+      if (copy.isConnected) copy.querySelector("span").textContent = t("copyShareLink");
+    }, 1400);
+  });
+  open.addEventListener("click", () => window.open(session.shareUrl, "_blank", "noopener"));
+  close.addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("pointerdown", (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+  actions.append(copy, open, close);
+  dialog.append(title, hint, label, expiry, actions);
+  overlay.append(dialog);
+  document.body.append(overlay);
+  input.focus();
+  input.select();
+  renderLucideIcons();
+}
+
+function createShareDialogButton(icon, label, className = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `share-link-button ${className}`.trim();
+  button.append(createIconPlaceholder(icon));
+  const text = document.createElement("span");
+  text.textContent = label;
+  button.append(text);
+  return button;
+}
+
+async function copyShareUrl(url, input) {
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    input.focus();
+    input.select();
+    document.execCommand("copy");
+  }
+}
+
+function showSharedUnavailable(message) {
+  sharedEventSource?.close();
+  sharedEventSource = null;
+  sharedSession = null;
+  resetPages();
+  let overlay = document.querySelector(".share-unavailable");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "share-unavailable";
+    const icon = createIconPlaceholder("clock-alert");
+    const title = document.createElement("h1");
+    const copy = document.createElement("p");
+    overlay.append(icon, title, copy);
+    canvasViewport.append(overlay);
+  }
+  overlay.querySelector("h1").textContent = message;
+  overlay.querySelector("p").textContent = t("shareExpires");
+  renderLucideIcons();
+}
+
+document.addEventListener("pointermove", broadcastSharedCursor, { passive: true });
 
 function loadDocumentCatalog() {
   try {
@@ -7158,6 +7778,7 @@ function saveAnnotations() {
     localStorage.setItem(`${storagePrefix}${currentDocumentKey}`, JSON.stringify(snapshot));
   } catch {}
   storeAnnotationSnapshot(currentDocumentKey, snapshot).catch(() => {});
+  scheduleSharedAnnotationSync();
 }
 
 function isPersistableAnnotation(annotation) {

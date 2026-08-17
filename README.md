@@ -164,3 +164,9 @@ node server.mjs
 ### Development
 
 There is no build step at the moment. Edit `index.html`, `script.js`, or `styles.css`, then refresh the browser. `server.mjs` serves static files with `Cache-Control: no-store`, which makes local and LAN debugging easier.
+
+### Live sharing
+
+Use **Export → Create share link** to upload the current source file and create a unique collaboration URL. Participants can see live pointers and synchronize annotations, zoom/pan state, and video playback. The server deletes each shared session and its uploaded file 24 hours after creation.
+
+Live sharing requires `server.mjs`; a static-file-only host cannot provide uploads or server-sent events. Production reverse proxies should disable buffering for the PointKing route and allow request bodies up to the configured `SHARE_MAX_UPLOAD_BYTES` value.

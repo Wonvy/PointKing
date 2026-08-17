@@ -2,10 +2,23 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <base id="appBase" href="/" />
+    <script>
+      (() => {
+        const pathname = location.pathname;
+        const shareIndex = pathname.indexOf("/share/");
+        const basePath = shareIndex >= 0
+          ? pathname.slice(0, shareIndex + 1)
+          : pathname.endsWith("/")
+            ? pathname
+            : pathname.slice(0, pathname.lastIndexOf("/") + 1);
+        document.querySelector("#appBase").href = basePath || "/";
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PointKing</title>
     <link rel="icon" type="image/svg+xml" href="./assets/pointking-icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=20260704-export-menu-tight" />
+    <link rel="stylesheet" href="./styles.css?v=20260817-live-share" />
   </head>
   <body>
     <input id="fileInput" class="visually-hidden-file" type="file" accept="application/pdf,image/png,image/jpeg,video/mp4" />
@@ -181,6 +194,6 @@
     </div>
 
     <script src="./vendor/lucide/lucide.min.js?v=20260704-mobile-logo-collapse"></script>
-    <script src="./script.js?v=20260704-mobile-logo-collapse" type="module"></script>
+    <script src="./script.js?v=20260817-live-share" type="module"></script>
   </body>
 </html>
