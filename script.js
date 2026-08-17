@@ -99,6 +99,15 @@ const translations = {
     shareOnline: "\u5b9e\u65f6\u5206\u4eab",
     shareReconnecting: "\u6b63\u5728\u91cd\u8fde",
     shareParticipants: "${count} \u4eba\u5728\u7ebf",
+    shareParticipantsTitle: "\u5728\u7ebf\u6210\u5458",
+    shareDesigner: "\u8bbe\u8ba1\u5e08",
+    shareGuest: "\u8bbf\u5ba2",
+    shareParticipantIp: "IP ${ip}",
+    shareConnectedAt: "\u8fde\u63a5\u4e8e ${time}",
+    shareEditNickname: "\u7f16\u8f91\u6635\u79f0",
+    shareNicknamePlaceholder: "\u8f93\u5165\u6635\u79f0",
+    shareNicknameSave: "\u4fdd\u5b58",
+    shareNicknameCancel: "\u53d6\u6d88",
     shareGuestActivity: "${name} \u6b63\u5728\u64cd\u4f5c",
     exportImageTitle: "\u5bfc\u51fa\u56fe\u7247",
     exportImageHint: "\u70b9\u51fb\u9884\u89c8\u6216\u6309\u94ae\u4e0b\u8f7d\u5230\u672c\u5730\u3002",
@@ -207,6 +216,15 @@ const translations = {
     shareOnline: "Live share",
     shareReconnecting: "Reconnecting",
     shareParticipants: "${count} online",
+    shareParticipantsTitle: "Online members",
+    shareDesigner: "Designer",
+    shareGuest: "Guest",
+    shareParticipantIp: "IP ${ip}",
+    shareConnectedAt: "Connected at ${time}",
+    shareEditNickname: "Edit nickname",
+    shareNicknamePlaceholder: "Enter a nickname",
+    shareNicknameSave: "Save",
+    shareNicknameCancel: "Cancel",
     shareGuestActivity: "${name} is interacting",
     exportImageTitle: "Export image",
     exportImageHint: "Click a preview or button to download it locally.",
@@ -282,6 +300,7 @@ const translations = {
 
 const svgNS = "http://www.w3.org/2000/svg";
 const storagePrefix = "pointking.annotations.";
+const sharedNicknameStoragePrefix = "pointking.share.nickname.";
 const lastDocumentKey = "pointking.lastDocument";
 const defaultDocumentKey = "demo:homepage-review.pdf";
 const documentCatalogStorageKey = "pointking.documents";
@@ -6913,7 +6932,7 @@ function activateSharedSession(session, role) {
   };
   ensureSharedLiveBadge();
   updateSharedLiveBadge("connecting");
-  const name = role === "host" ? (currentLanguage === "zh" ? "发起人" : "Host") : (currentLanguage === "zh" ? "访客" : "Guest");
+  const name = getStoredSharedNickname(role) || getSharedRoleName(role);
   const eventUrl = `api/share-sessions/${encodeURIComponent(session.id)}/events?clientId=${encodeURIComponent(sharedClientId)}&role=${role}&name=${encodeURIComponent(name)}`;
   sharedEventSource = new EventSource(eventUrl);
   sharedEventSource.addEventListener("open", () => updateSharedLiveBadge("online"));
@@ -6934,12 +6953,14 @@ function handleSharedEvent(event) {
   if (event.type === "snapshot") {
     sharedSession.expiresAt = event.session?.expiresAt || sharedSession.expiresAt;
     sharedSession.participants = event.participants || [];
+    refreshSharedCursorLabels();
     updateSharedLiveBadge("online");
     return;
   }
   if (event.type === "presence") {
     sharedSession.participants = event.participants || [];
     removeAbsentSharedCursors();
+    refreshSharedCursorLabels();
     updateSharedLiveBadge("online");
     return;
   }
@@ -6999,7 +7020,7 @@ function scheduleSharedAnnotationSync() {
   sharedAnnotationTimer = setTimeout(() => {
     const snapshot = annotations.filter((annotation) => !annotation.draft && isPersistableAnnotation(annotation));
     postSharedEvent("annotations", { annotations: snapshot, deletedPageIds: getSharedDeletedPageIds() }, { queued: true });
-    postSharedEvent("activity", { name: sharedSession.role === "host" ? (currentLanguage === "zh" ? "发起人" : "Host") : (currentLanguage === "zh" ? "访客" : "Guest") });
+    postSharedEvent("activity", { name: getCurrentSharedDisplayName() });
   }, 100);
 }
 
@@ -7110,7 +7131,41 @@ function getSharedCursorColor(clientId) {
 }
 
 function getSharedParticipantName(clientId) {
-  return sharedSession?.participants?.find((participant) => participant.id === clientId)?.name || (currentLanguage === "zh" ? "访客" : "Guest");
+  const participant = sharedSession?.participants?.find((item) => item.id === clientId);
+  if (!participant) return t("shareGuest");
+  return getSharedParticipantDisplayName(participant);
+}
+
+function getSharedRoleName(role) {
+  return t(role === "host" ? "shareDesigner" : "shareGuest");
+}
+
+function getSharedParticipantDisplayName(participant) {
+  return cleanSharedNickname(participant?.name) || getSharedRoleName(participant?.role);
+}
+
+function getCurrentSharedDisplayName() {
+  const participant = sharedSession?.participants?.find((item) => item.id === sharedClientId);
+  return participant ? getSharedParticipantDisplayName(participant) : getStoredSharedNickname(sharedSession?.role) || getSharedRoleName(sharedSession?.role);
+}
+
+function getStoredSharedNickname(role) {
+  try {
+    return cleanSharedNickname(localStorage.getItem(`${sharedNicknameStoragePrefix}${role}`));
+  } catch {
+    return "";
+  }
+}
+
+function cleanSharedNickname(value) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 30);
+}
+
+function refreshSharedCursorLabels() {
+  for (const [clientId, cursor] of sharedRemoteCursors) {
+    const label = cursor.querySelector(".shared-remote-cursor-label");
+    if (label) label.textContent = getSharedParticipantName(clientId);
+  }
 }
 
 function removeAbsentSharedCursors() {
@@ -7128,7 +7183,17 @@ function ensureSharedLiveBadge() {
   if (badge) return badge;
   badge = document.createElement("div");
   badge.className = "share-live-badge";
-  badge.innerHTML = '<span class="share-live-dot"></span><span class="share-live-label"></span><span class="share-live-count"></span>';
+  badge.tabIndex = 0;
+  badge.setAttribute("role", "status");
+  badge.innerHTML = [
+    '<span class="share-live-dot" aria-hidden="true"></span>',
+    '<span class="share-live-label"></span>',
+    '<span class="share-live-count"></span>',
+    '<section class="share-participant-popover">',
+    '  <div class="share-participant-title"></div>',
+    '  <div class="share-participant-list"></div>',
+    '</section>',
+  ].join("");
   document.body.append(badge);
   return badge;
 }
@@ -7140,6 +7205,124 @@ function updateSharedLiveBadge(status) {
   badge.querySelector(".share-live-label").textContent = t(labels[status] || "shareOnline");
   const count = sharedSession?.participants?.length || 1;
   badge.querySelector(".share-live-count").textContent = t("shareParticipants", { count });
+  badge.querySelector(".share-participant-title").textContent = t("shareParticipantsTitle");
+  badge.setAttribute("aria-label", `${t(labels[status] || "shareOnline")}，${t("shareParticipants", { count })}`);
+  renderSharedParticipantList();
+}
+
+function renderSharedParticipantList() {
+  const list = ensureSharedLiveBadge().querySelector(".share-participant-list");
+  const fallbackParticipant = sharedSession ? [{
+    id: sharedSession.clientId,
+    role: sharedSession.role,
+    name: getSharedRoleName(sharedSession.role),
+    ip: "—",
+    connectedAt: Date.now(),
+  }] : [];
+  const participants = [...(sharedSession?.participants?.length ? sharedSession.participants : fallbackParticipant)].sort((a, b) => {
+    if (a.role !== b.role) return a.role === "host" ? -1 : 1;
+    return Number(a.connectedAt || 0) - Number(b.connectedAt || 0);
+  });
+  list.replaceChildren();
+  for (const participant of participants) {
+    const row = document.createElement("div");
+    row.className = "share-participant-row";
+
+    const avatar = document.createElement("span");
+    avatar.className = "share-participant-avatar";
+    avatar.style.setProperty("--participant-color", getSharedCursorColor(participant.id || participant.role));
+    const displayName = getSharedParticipantDisplayName(participant);
+    avatar.textContent = displayName.slice(0, 1);
+
+    const details = document.createElement("div");
+    details.className = "share-participant-details";
+    const name = document.createElement("strong");
+    name.className = "share-participant-name";
+    name.textContent = displayName;
+    const meta = document.createElement("span");
+    meta.className = "share-participant-meta";
+    meta.textContent = `${getSharedRoleName(participant.role)} · ${t("shareParticipantIp", { ip: participant.ip || "—" })}`;
+    details.append(name, meta);
+
+    const side = document.createElement("div");
+    side.className = "share-participant-side";
+    const connectedAt = document.createElement("time");
+    connectedAt.className = "share-participant-time";
+    const connectedTime = Number(participant.connectedAt) ? new Date(participant.connectedAt).toLocaleTimeString(currentLanguage === "zh" ? "zh-CN" : "en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }) : "—";
+    connectedAt.textContent = connectedTime;
+    connectedAt.title = t("shareConnectedAt", { time: connectedTime });
+    side.append(connectedAt);
+
+    if (participant.id === sharedClientId) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "share-participant-edit";
+      edit.textContent = t("shareEditNickname");
+      edit.addEventListener("click", (event) => {
+        event.stopPropagation();
+        startSharedNicknameEdit(row, participant);
+      });
+      side.append(edit);
+    }
+
+    row.append(avatar, details, side);
+    list.append(row);
+  }
+}
+
+function startSharedNicknameEdit(row, participant) {
+  const details = row.querySelector(".share-participant-details");
+  const side = row.querySelector(".share-participant-side");
+  const input = document.createElement("input");
+  input.className = "share-nickname-input";
+  input.type = "text";
+  input.maxLength = 30;
+  input.placeholder = t("shareNicknamePlaceholder");
+  input.value = getSharedParticipantDisplayName(participant);
+
+  const actions = document.createElement("div");
+  actions.className = "share-nickname-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "share-nickname-save";
+  save.textContent = t("shareNicknameSave");
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "share-nickname-cancel";
+  cancel.textContent = t("shareNicknameCancel");
+  actions.append(save, cancel);
+  details.replaceChildren(input, actions);
+  side.hidden = true;
+
+  const submit = () => updateSharedNickname(input.value);
+  save.addEventListener("click", submit);
+  cancel.addEventListener("click", renderSharedParticipantList);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submit();
+    else if (event.key === "Escape") renderSharedParticipantList();
+  });
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select();
+  });
+}
+
+async function updateSharedNickname(value) {
+  if (!sharedSession) return;
+  const role = sharedSession.role;
+  const nickname = cleanSharedNickname(value) || getSharedRoleName(role);
+  try {
+    if (nickname === getSharedRoleName(role)) localStorage.removeItem(`${sharedNicknameStoragePrefix}${role}`);
+    else localStorage.setItem(`${sharedNicknameStoragePrefix}${role}`, nickname);
+  } catch {}
+  const self = sharedSession.participants?.find((participant) => participant.id === sharedClientId);
+  if (self) self.name = nickname;
+  refreshSharedCursorLabels();
+  renderSharedParticipantList();
+  await postSharedEvent("profile", { name: nickname });
 }
 
 function showSharedActivity(name) {

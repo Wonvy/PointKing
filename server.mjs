@@ -245,9 +245,12 @@ function parseByteRange(value, size) {
 function openEventStream(request, response, url, session) {
   const clientId = cleanClientId(url.searchParams.get("clientId")) || createSessionId();
   const role = url.searchParams.get("role") === "host" ? "host" : "guest";
-  const name = cleanText(url.searchParams.get("name"), 40) || (role === "host" ? "发起人" : "访客");
+  const requestedName = cleanText(url.searchParams.get("name"), 30);
+  const legacyHostName = role === "host" && ["发起人", "Host"].includes(requestedName);
+  const name = legacyHostName ? "设计师" : requestedName || (role === "host" ? "设计师" : "访客");
+  const ip = getClientIp(request);
   const clients = getLiveClients(session.id);
-  clients.set(clientId, { id: clientId, role, name, response, connectedAt: Date.now() });
+  clients.set(clientId, { id: clientId, role, name, ip, response, connectedAt: Date.now() });
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -270,9 +273,20 @@ function openEventStream(request, response, url, session) {
 
 async function receiveSharedEvent(response, session, input) {
   const sender = cleanClientId(input.sender);
-  const allowedTypes = new Set(["cursor", "annotations", "view", "video", "activity"]);
+  const allowedTypes = new Set(["cursor", "annotations", "view", "video", "activity", "profile"]);
   if (!sender || !allowedTypes.has(input.type)) {
     sendJson(response, 400, { error: "invalid_share_event" });
+    return;
+  }
+  if (input.type === "profile") {
+    const client = liveClients.get(session.id)?.get(sender);
+    if (!client) {
+      sendJson(response, 409, { error: "share_client_not_connected" });
+      return;
+    }
+    client.name = cleanText(input.payload?.name, 30) || (client.role === "host" ? "设计师" : "访客");
+    broadcastPresence(session.id);
+    sendJson(response, 202, { ok: true, name: client.name });
     return;
   }
   const event = {
@@ -389,7 +403,13 @@ function broadcastPresence(id) {
 }
 
 function publicParticipants(id) {
-  return [...(liveClients.get(id)?.values() || [])].map(({ id: clientId, role, name, connectedAt }) => ({ id: clientId, role, name, connectedAt }));
+  return [...(liveClients.get(id)?.values() || [])].map(({ id: clientId, role, name, ip, connectedAt }) => ({
+    id: clientId,
+    role,
+    name,
+    ip,
+    connectedAt,
+  }));
 }
 
 function broadcast(id, event, excludedClientId = "") {
@@ -459,6 +479,20 @@ function createSessionId() {
 function cleanClientId(value) {
   const text = String(value || "");
   return /^[A-Za-z0-9_-]{8,80}$/.test(text) ? text : "";
+}
+
+function getClientIp(request) {
+  const realIp = normalizeClientIp(request.headers["x-real-ip"]);
+  if (realIp) return realIp;
+  const forwardedIp = normalizeClientIp(String(request.headers["x-forwarded-for"] || "").split(",")[0]);
+  if (forwardedIp) return forwardedIp;
+  return normalizeClientIp(request.socket?.remoteAddress) || "—";
+}
+
+function normalizeClientIp(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const text = cleanText(raw, 80);
+  return text.startsWith("::ffff:") ? text.slice(7) : text;
 }
 
 function cleanText(value, maxLength) {

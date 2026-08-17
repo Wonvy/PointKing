@@ -66,10 +66,29 @@ test("share sessions upload, stream state, and delete expired files", { timeout:
     assert.equal((await fetch(`${origin}/api/share-sessions/${first.id}/file`, { headers: { Range: "bytes=99-100" } })).status, 416);
 
     const abort = new AbortController();
-    const stream = await fetch(`${origin}/api/share-sessions/${first.id}/events?clientId=client-alpha&role=host&name=Host`, { signal: abort.signal });
+    const stream = await fetch(`${origin}/api/share-sessions/${first.id}/events?clientId=client-alpha&role=host&name=Host`, {
+      headers: { "X-Real-IP": "203.0.113.9" },
+      signal: abort.signal,
+    });
     assert.equal(stream.status, 200);
     const reader = stream.body.getReader();
-    assert.equal((await readSseEvent(reader)).type, "snapshot");
+    const snapshot = await readSseEvent(reader);
+    assert.equal(snapshot.type, "snapshot");
+    assert.deepEqual(snapshot.participants[0], {
+      id: "client-alpha",
+      role: "host",
+      name: "设计师",
+      ip: "203.0.113.9",
+      connectedAt: snapshot.participants[0].connectedAt,
+    });
+    const profileResponse = await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
+      type: "profile",
+      sender: "client-alpha",
+      payload: { name: "小王" },
+    }, 202);
+    assert.equal(profileResponse.name, "小王");
+    const renamedPresence = await readSseEvent(reader, "presence", (event) => event.participants[0]?.name === "小王");
+    assert.equal(renamedPresence.participants[0].name, "小王");
 
     const eventResponse = await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
       type: "annotations",
@@ -140,7 +159,7 @@ async function waitForServer(child) {
   }
 }
 
-async function readSseEvent(reader, expectedType = "snapshot") {
+async function readSseEvent(reader, expectedType = "snapshot", predicate = () => true) {
   const decoder = new TextDecoder();
   let buffer = "";
   const deadline = Date.now() + 3_000;
@@ -152,7 +171,7 @@ async function readSseEvent(reader, expectedType = "snapshot") {
       const line = block.split(/\n/).find((entry) => entry.startsWith("data: "));
       if (!line) continue;
       const event = JSON.parse(line.slice(6));
-      if (event.type === expectedType) return event;
+      if (event.type === expectedType && predicate(event)) return event;
     }
   }
   throw new Error(`Timed out waiting for SSE event ${expectedType}`);
