@@ -82,13 +82,16 @@ async function handleShareApi(request, response, url) {
     const input = await readJsonBody(request);
     const now = Date.now();
     const id = createSessionId();
+    const file = normalizeFileMetadata(input.file);
+    const state = normalizeSharedState(input.state);
     const session = {
       id,
       createdAt: now,
       expiresAt: now + shareTtlMs,
       title: cleanText(input.title, 240) || "PointKing",
-      file: normalizeFileMetadata(input.file),
-      state: normalizeSharedState(input.state),
+      file,
+      projectSize: file?.size || Buffer.byteLength(JSON.stringify(state), "utf8"),
+      state,
     };
     await writeSession(session);
     sendJson(response, 201, publicSession(session));
@@ -182,6 +185,7 @@ async function receiveSharedFile(request, response, session) {
       lastModified: Number(request.headers["x-file-last-modified"] || session.file?.lastModified || Date.now()),
       uploaded: true,
     };
+    session.projectSize = size;
     await writeSession(session);
     broadcast(session.id, { type: "file-ready", file: session.file, sentAt: Date.now() });
     sendJson(response, 201, { ok: true, file: session.file });
@@ -250,7 +254,7 @@ function openEventStream(request, response, url, session) {
   const name = legacyHostName ? "设计师" : requestedName || (role === "host" ? "设计师" : "访客");
   const ip = getClientIp(request);
   const clients = getLiveClients(session.id);
-  clients.set(clientId, { id: clientId, role, name, ip, response, connectedAt: Date.now() });
+  clients.set(clientId, { id: clientId, role, name, ip, voiceEnabled: false, response, connectedAt: Date.now() });
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -273,13 +277,13 @@ function openEventStream(request, response, url, session) {
 
 async function receiveSharedEvent(response, session, input) {
   const sender = cleanClientId(input.sender);
-  const allowedTypes = new Set(["cursor", "annotations", "view", "video", "activity", "profile"]);
+  const allowedTypes = new Set(["cursor", "annotations", "view", "video", "activity", "profile", "voice-state", "rtc-signal"]);
   if (!sender || !allowedTypes.has(input.type)) {
     sendJson(response, 400, { error: "invalid_share_event" });
     return;
   }
+  const client = liveClients.get(session.id)?.get(sender);
   if (input.type === "profile") {
-    const client = liveClients.get(session.id)?.get(sender);
     if (!client) {
       sendJson(response, 409, { error: "share_client_not_connected" });
       return;
@@ -287,6 +291,33 @@ async function receiveSharedEvent(response, session, input) {
     client.name = cleanText(input.payload?.name, 30) || (client.role === "host" ? "设计师" : "访客");
     broadcastPresence(session.id);
     sendJson(response, 202, { ok: true, name: client.name });
+    return;
+  }
+  if (input.type === "voice-state") {
+    if (!client) {
+      sendJson(response, 409, { error: "share_client_not_connected" });
+      return;
+    }
+    client.voiceEnabled = input.payload?.enabled === true;
+    broadcastPresence(session.id);
+    sendJson(response, 202, { ok: true, voiceEnabled: client.voiceEnabled });
+    return;
+  }
+  if (input.type === "rtc-signal") {
+    const target = cleanClientId(input.payload?.target);
+    const targetClient = liveClients.get(session.id)?.get(target);
+    const signal = normalizeRtcSignal(input.payload);
+    if (!client?.voiceEnabled || !targetClient?.voiceEnabled || !signal) {
+      sendJson(response, 409, { error: "voice_peer_not_available" });
+      return;
+    }
+    sendSse(targetClient.response, {
+      type: "rtc-signal",
+      sender,
+      sentAt: Date.now(),
+      payload: signal,
+    });
+    sendJson(response, 202, { ok: true });
     return;
   }
   const event = {
@@ -327,6 +358,7 @@ function publicSession(session) {
     createdAt: session.createdAt,
     expiresAt: session.expiresAt,
     file: session.file || null,
+    projectSize: Math.max(0, Number(session.projectSize || session.file?.size || 0)),
     state: session.state || normalizeSharedState({}),
   };
 }
@@ -372,6 +404,32 @@ function normalizeVideoState(input = {}) {
   };
 }
 
+function normalizeRtcSignal(input = {}) {
+  const target = cleanClientId(input.target);
+  if (!target) return null;
+  if (input.description && ["offer", "answer"].includes(input.description.type) && typeof input.description.sdp === "string") {
+    return {
+      target,
+      description: {
+        type: input.description.type,
+        sdp: input.description.sdp.slice(0, 200_000),
+      },
+    };
+  }
+  if (input.candidate && typeof input.candidate.candidate === "string") {
+    return {
+      target,
+      candidate: {
+        candidate: input.candidate.candidate.slice(0, 4_000),
+        sdpMid: cleanText(input.candidate.sdpMid, 100) || null,
+        sdpMLineIndex: Number.isInteger(input.candidate.sdpMLineIndex) ? input.candidate.sdpMLineIndex : null,
+        usernameFragment: cleanText(input.candidate.usernameFragment, 200) || null,
+      },
+    };
+  }
+  return null;
+}
+
 function normalizeFileMetadata(input) {
   if (!input || typeof input !== "object") return null;
   return {
@@ -403,11 +461,12 @@ function broadcastPresence(id) {
 }
 
 function publicParticipants(id) {
-  return [...(liveClients.get(id)?.values() || [])].map(({ id: clientId, role, name, ip, connectedAt }) => ({
+  return [...(liveClients.get(id)?.values() || [])].map(({ id: clientId, role, name, ip, voiceEnabled, connectedAt }) => ({
     id: clientId,
     role,
     name,
     ip,
+    voiceEnabled: voiceEnabled === true,
     connectedAt,
   }));
 }

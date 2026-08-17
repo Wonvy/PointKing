@@ -163,15 +163,14 @@
 }
 
 .share-live-badge {
-  position: fixed;
+  position: relative;
   z-index: 76;
-  top: 12px;
-  left: 50%;
   display: flex;
+  max-width: 100%;
+  flex: 0 1 auto;
   min-height: 34px;
   align-items: center;
   gap: 7px;
-  transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, #24c875 40%, var(--line));
   border-radius: 999px;
   background: color-mix(in srgb, var(--panel) 94%, transparent);
@@ -184,6 +183,21 @@
   backdrop-filter: blur(12px);
   cursor: default;
   outline: none;
+}
+
+.document-title.share-active {
+  gap: 0;
+  overflow: visible;
+}
+
+.document-title.share-active > .title-brand-mark,
+.document-title.share-active > div:not(.share-live-badge) {
+  display: none;
+}
+
+.document-title .share-live-badge > span {
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .share-live-badge:focus-visible {
@@ -211,11 +225,40 @@
   font-weight: 550;
 }
 
+.share-voice-toggle {
+  min-height: 24px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--text);
+  padding: 0 8px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.share-voice-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.share-voice-toggle[data-state="active"] {
+  border-color: color-mix(in srgb, #24c875 48%, var(--line));
+  background: color-mix(in srgb, #24c875 15%, transparent);
+  color: #24c875;
+}
+
+.share-voice-toggle[data-state="starting"] {
+  cursor: progress;
+  opacity: 0.72;
+}
+
 .share-participant-popover {
   position: absolute;
   top: calc(100% + 9px);
-  left: 50%;
-  width: min(310px, calc(100vw - 24px));
+  left: 0;
+  width: min(340px, calc(100vw - 24px));
   border: 1px solid var(--line);
   border-radius: 14px;
   background: color-mix(in srgb, var(--panel) 98%, transparent);
@@ -225,7 +268,7 @@
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translate(-50%, -5px);
+  transform: translateY(-5px);
   transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
   backdrop-filter: blur(16px);
 }
@@ -240,19 +283,38 @@
 }
 
 .share-live-badge:hover .share-participant-popover,
-.share-live-badge:focus .share-participant-popover,
 .share-live-badge:focus-within .share-participant-popover {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
+}
+
+.share-participant-header {
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px 9px;
 }
 
 .share-participant-title {
-  border-bottom: 1px solid var(--line);
-  padding: 6px 8px 9px;
   font-size: 12px;
   font-weight: 750;
+}
+
+.share-voice-status {
+  color: var(--soft);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.share-project-meta {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .share-participant-list {
@@ -276,6 +338,7 @@
 }
 
 .share-participant-avatar {
+  position: relative;
   display: grid;
   width: 30px;
   height: 30px;
@@ -286,6 +349,19 @@
   font-size: 12px;
   font-weight: 800;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.share-participant-row.voice-active .share-participant-avatar::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: #24c875;
+  box-shadow: 0 0 0 1px rgba(36, 200, 117, 0.24);
 }
 
 .share-participant-details {
@@ -377,6 +453,10 @@
 .share-nickname-save {
   background: var(--accent);
   color: #fff;
+}
+
+.shared-voice-audio {
+  display: none;
 }
 
 .shared-remote-cursor {
@@ -482,8 +562,12 @@
   }
 
   .share-live-badge {
-    top: 8px;
-    max-width: calc(100vw - 112px);
+    max-width: 100%;
+    padding: 0 8px;
+  }
+
+  .share-live-badge .share-live-label {
+    display: none;
   }
 }
 

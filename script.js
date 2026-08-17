@@ -85,7 +85,7 @@ const translations = {
     shareFailed: "\u521b\u5efa\u5206\u4eab\u94fe\u63a5\u5931\u8d25",
     shareNoDocument: "\u8bf7\u5148\u6253\u5f00\u4e00\u4e2a\u6587\u4ef6\u6216\u753b\u5e03",
     shareDialogTitle: "\u5b9e\u65f6\u5206\u4eab\u94fe\u63a5",
-    shareDialogHint: "\u53d1\u9001\u8fd9\u4e2a\u552f\u4e00\u94fe\u63a5\u3002\u6253\u5f00\u540e\u53ef\u540c\u6b65\u9f20\u6807\u3001\u7f29\u653e\u3001\u6279\u6ce8\u548c\u89c6\u9891\u8fdb\u5ea6\u3002",
+    shareDialogHint: "\u53d1\u9001\u8fd9\u4e2a\u552f\u4e00\u94fe\u63a5\u3002\u6253\u5f00\u540e\u53ef\u540c\u6b65\u9f20\u6807\u3001\u7f29\u653e\u3001\u6279\u6ce8\u3001\u89c6\u9891\u8fdb\u5ea6\uff0c\u5e76\u8fdb\u884c\u8bed\u97f3\u5bf9\u8bdd\u3002",
     shareLinkLabel: "\u5206\u4eab\u94fe\u63a5",
     copyShareLink: "\u590d\u5236\u94fe\u63a5",
     shareCopied: "\u5df2\u590d\u5236",
@@ -104,10 +104,21 @@ const translations = {
     shareGuest: "\u8bbf\u5ba2",
     shareParticipantIp: "IP ${ip}",
     shareConnectedAt: "\u8fde\u63a5\u4e8e ${time}",
+    shareProjectSize: "\u9879\u76ee\u5927\u5c0f ${size}",
     shareEditNickname: "\u7f16\u8f91\u6635\u79f0",
     shareNicknamePlaceholder: "\u8f93\u5165\u6635\u79f0",
     shareNicknameSave: "\u4fdd\u5b58",
     shareNicknameCancel: "\u53d6\u6d88",
+    shareVoiceJoin: "\u52a0\u5165\u8bed\u97f3",
+    shareVoiceLeave: "\u9000\u51fa\u8bed\u97f3",
+    shareVoiceStarting: "\u6b63\u5728\u5f00\u542f\u9ea6\u514b\u98ce\u2026",
+    shareVoiceOff: "\u8bed\u97f3\u672a\u5f00\u542f",
+    shareVoiceWaiting: "\u8bed\u97f3\u5df2\u5f00\u542f\uff0c\u7b49\u5f85\u5176\u4ed6\u6210\u5458\u52a0\u5165",
+    shareVoiceConnected: "\u8bed\u97f3\u5bf9\u8bdd\u4e2d \u00b7 ${count} \u4eba",
+    shareVoiceActive: "\u8bed\u97f3\u4e2d",
+    shareVoicePermissionDenied: "\u65e0\u6cd5\u4f7f\u7528\u9ea6\u514b\u98ce\uff0c\u8bf7\u5728\u6d4f\u89c8\u5668\u5730\u5740\u680f\u5141\u8bb8\u9ea6\u514b\u98ce\u6743\u9650",
+    shareVoiceUnsupported: "\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u5b9e\u65f6\u8bed\u97f3",
+    shareVoiceFailed: "\u8bed\u97f3\u8fde\u63a5\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5",
     shareGuestActivity: "${name} \u6b63\u5728\u64cd\u4f5c",
     exportImageTitle: "\u5bfc\u51fa\u56fe\u7247",
     exportImageHint: "\u70b9\u51fb\u9884\u89c8\u6216\u6309\u94ae\u4e0b\u8f7d\u5230\u672c\u5730\u3002",
@@ -202,7 +213,7 @@ const translations = {
     shareFailed: "Could not create the share link",
     shareNoDocument: "Open a file or board first",
     shareDialogTitle: "Live share link",
-    shareDialogHint: "Send this unique link. Anyone who opens it can sync the pointer, zoom, annotations, and video position.",
+    shareDialogHint: "Send this unique link. Anyone who opens it can sync the pointer, zoom, annotations, video position, and join voice chat.",
     shareLinkLabel: "Share link",
     copyShareLink: "Copy link",
     shareCopied: "Copied",
@@ -221,10 +232,21 @@ const translations = {
     shareGuest: "Guest",
     shareParticipantIp: "IP ${ip}",
     shareConnectedAt: "Connected at ${time}",
+    shareProjectSize: "Project size ${size}",
     shareEditNickname: "Edit nickname",
     shareNicknamePlaceholder: "Enter a nickname",
     shareNicknameSave: "Save",
     shareNicknameCancel: "Cancel",
+    shareVoiceJoin: "Join voice",
+    shareVoiceLeave: "Leave voice",
+    shareVoiceStarting: "Starting microphone...",
+    shareVoiceOff: "Voice is off",
+    shareVoiceWaiting: "Voice is on, waiting for others to join",
+    shareVoiceConnected: "Voice chat · ${count} people",
+    shareVoiceActive: "In voice",
+    shareVoicePermissionDenied: "Microphone access is blocked. Allow it from the browser address bar.",
+    shareVoiceUnsupported: "This browser does not support live voice",
+    shareVoiceFailed: "Voice connection failed. Please try again.",
     shareGuestActivity: "${name} is interacting",
     exportImageTitle: "Export image",
     exportImageHint: "Click a preview or button to download it locally.",
@@ -389,6 +411,7 @@ const pendingVideoRegionPreviewIds = new Set();
 const collapsedCommentGroups = new Set();
 const activeCanvasPointers = new Map();
 const sharedRemoteCursors = new Map();
+const sharedVoicePeers = new Map();
 
 const sharedClientId = createSharedClientId();
 let sharedSession = null;
@@ -402,6 +425,8 @@ let sharedEventQueue = Promise.resolve();
 let sharedLastVideoFingerprint = "";
 let sharedActivityTimer = null;
 let sharedRemoteVideoUntil = 0;
+let sharedVoiceStream = null;
+let sharedVoiceState = "idle";
 
 pdfjs.GlobalWorkerOptions.workerSrc =
   "./vendor/pdfjs/pdf.worker.min.mjs";
@@ -412,6 +437,7 @@ applyTheme();
 applyLanguage();
 restoreLayout();
 centerCanvas();
+window.addEventListener("pagehide", () => stopSharedVoice({ notify: false }));
 initializeApplicationDocument();
 bindResizeHandle(leftResizeHandle, "left");
 bindResizeHandle(rightResizeHandle, "right");
@@ -1001,6 +1027,7 @@ function applyLanguage() {
   renderCommentFilterTabs();
   updateCollapseButtons();
   applyTheme();
+  if (sharedSession) updateSharedLiveBadge(document.querySelector(".share-live-badge")?.dataset.status || "online");
 }
 
 function setFileMetaText(text) {
@@ -6520,12 +6547,14 @@ function updateCurrentDocumentPageMeta(extraText = "") {
     return;
   }
   if (!pageCount) {
-    setFileMetaText(`0 pages \u00b7 \u672c\u5730\u9884\u89c8`);
+    const sizeText = Number(currentRecord?.size || 0) ? `${formatBytes(currentRecord.size)} \u00b7 ` : "";
+    setFileMetaText(`${sizeText}0 pages \u00b7 \u672c\u5730\u9884\u89c8`);
     if (currentDocumentKey) updateDocumentRecord(currentDocumentKey, { pageCount: 0 });
     return;
   }
   const suffix = extraText ? ` \u00b7 ${extraText}` : "";
-  setFileMetaText(`${pageCount} pages${suffix} \u00b7 \u672c\u5730\u9884\u89c8`);
+  const sizeText = Number(currentRecord?.size || 0) ? `${formatBytes(currentRecord.size)} \u00b7 ` : "";
+  setFileMetaText(`${sizeText}${pageCount} pages${suffix} \u00b7 \u672c\u5730\u9884\u89c8`);
   if (currentDocumentKey) {
     updateDocumentRecord(currentDocumentKey, { pageCount });
   }
@@ -6630,7 +6659,7 @@ async function renderPdf(file) {
     await pdfPage.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
   }
 
-  setFileMetaText(`${pdf.numPages} pages \u00b7 \u672c\u5730\u9884\u89c8`);
+  setFileMetaText(`${formatBytes(file.size)} \u00b7 ${pdf.numPages} pages \u00b7 \u672c\u5730\u9884\u89c8`);
   renderAnnotations();
   resetCanvasView();
 }
@@ -6922,6 +6951,7 @@ function removeSharedDeletedPages() {
 }
 
 function activateSharedSession(session, role) {
+  stopSharedVoice({ notify: false });
   sharedEventSource?.close();
   sharedSession = {
     ...session,
@@ -6935,7 +6965,10 @@ function activateSharedSession(session, role) {
   const name = getStoredSharedNickname(role) || getSharedRoleName(role);
   const eventUrl = `api/share-sessions/${encodeURIComponent(session.id)}/events?clientId=${encodeURIComponent(sharedClientId)}&role=${role}&name=${encodeURIComponent(name)}`;
   sharedEventSource = new EventSource(eventUrl);
-  sharedEventSource.addEventListener("open", () => updateSharedLiveBadge("online"));
+  sharedEventSource.addEventListener("open", () => {
+    updateSharedLiveBadge("online");
+    if (sharedVoiceState === "active") postSharedEvent("voice-state", { enabled: true });
+  });
   sharedEventSource.addEventListener("message", (event) => {
     try {
       handleSharedEvent(JSON.parse(event.data));
@@ -6955,6 +6988,7 @@ function handleSharedEvent(event) {
     sharedSession.participants = event.participants || [];
     refreshSharedCursorLabels();
     updateSharedLiveBadge("online");
+    syncSharedVoicePeers();
     return;
   }
   if (event.type === "presence") {
@@ -6962,6 +6996,7 @@ function handleSharedEvent(event) {
     removeAbsentSharedCursors();
     refreshSharedCursorLabels();
     updateSharedLiveBadge("online");
+    syncSharedVoicePeers();
     return;
   }
   if (event.sender === sharedClientId) return;
@@ -6970,7 +7005,11 @@ function handleSharedEvent(event) {
   else if (event.type === "view") applyRemoteSharedView(event.payload || {});
   else if (event.type === "video") applyRemoteSharedVideo(event.payload || {});
   else if (event.type === "activity") showSharedActivity(event.payload?.name || (currentLanguage === "zh" ? "访客" : "Guest"));
-  else if (event.type === "session-expired") showSharedUnavailable(t("shareExpired"));
+  else if (event.type === "rtc-signal") handleSharedRtcSignal(event.sender, event.payload || {}).catch((error) => console.warn("Ignored invalid RTC signal", error));
+  else if (event.type === "session-expired") {
+    stopSharedVoice({ notify: false });
+    showSharedUnavailable(t("shareExpired"));
+  }
 }
 
 function applyRemoteSharedAnnotations(payload) {
@@ -7058,6 +7097,234 @@ function postSharedEvent(type, payload, options = {}) {
     console.warn(error);
     return false;
   });
+}
+
+async function toggleSharedVoice() {
+  if (sharedVoiceState === "starting") return;
+  if (sharedVoiceState === "active") {
+    stopSharedVoice();
+    return;
+  }
+  await startSharedVoice();
+}
+
+async function startSharedVoice() {
+  if (!sharedSession) return;
+  if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === "undefined") {
+    sharedVoiceState = "error";
+    updateSharedVoiceUi();
+    showAnnotationNotice(t("shareVoiceUnsupported"));
+    return;
+  }
+
+  sharedVoiceState = "starting";
+  updateSharedVoiceUi();
+  try {
+    sharedVoiceStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+    sharedVoiceState = "active";
+    const self = sharedSession.participants?.find((participant) => participant.id === sharedClientId);
+    if (self) self.voiceEnabled = true;
+    updateSharedVoiceUi();
+    renderSharedParticipantList();
+    const announced = await postSharedEvent("voice-state", { enabled: true });
+    if (!announced) throw new Error("Unable to announce voice state");
+    syncSharedVoicePeers();
+  } catch (error) {
+    const permissionDenied = ["NotAllowedError", "SecurityError"].includes(error?.name);
+    stopSharedVoice({ notify: false });
+    sharedVoiceState = "error";
+    updateSharedVoiceUi();
+    showAnnotationNotice(t(permissionDenied ? "shareVoicePermissionDenied" : "shareVoiceFailed"));
+    console.warn("Unable to start shared voice", error);
+  }
+}
+
+function stopSharedVoice(options = {}) {
+  const shouldNotify = options.notify !== false && sharedVoiceState === "active" && sharedSession;
+  for (const clientId of [...sharedVoicePeers.keys()]) closeSharedVoicePeer(clientId);
+  for (const track of sharedVoiceStream?.getTracks?.() || []) track.stop();
+  sharedVoiceStream = null;
+  sharedVoiceState = "idle";
+  const self = sharedSession?.participants?.find((participant) => participant.id === sharedClientId);
+  if (self) self.voiceEnabled = false;
+  updateSharedVoiceUi();
+  if (sharedSession) renderSharedParticipantList();
+  if (shouldNotify) postSharedEvent("voice-state", { enabled: false });
+}
+
+function updateSharedVoiceUi() {
+  const badge = document.querySelector(".share-live-badge");
+  if (!badge) return;
+  const button = badge.querySelector(".share-voice-toggle");
+  const status = badge.querySelector(".share-voice-status");
+  if (!button || !status) return;
+  const connectedPeers = [...sharedVoicePeers.values()].filter(({ connection }) => connection.connectionState === "connected").length;
+  button.disabled = sharedVoiceState === "starting";
+  button.dataset.state = sharedVoiceState;
+  button.textContent = t(sharedVoiceState === "active" ? "shareVoiceLeave" : sharedVoiceState === "starting" ? "shareVoiceStarting" : "shareVoiceJoin");
+  button.setAttribute("aria-pressed", String(sharedVoiceState === "active"));
+  if (sharedVoiceState === "starting") status.textContent = t("shareVoiceStarting");
+  else if (sharedVoiceState === "error") status.textContent = t("shareVoiceFailed");
+  else if (sharedVoiceState !== "active") status.textContent = t("shareVoiceOff");
+  else if (connectedPeers) status.textContent = t("shareVoiceConnected", { count: connectedPeers + 1 });
+  else status.textContent = t("shareVoiceWaiting");
+}
+
+function syncSharedVoicePeers() {
+  if (sharedVoiceState !== "active" || !sharedVoiceStream) {
+    for (const clientId of [...sharedVoicePeers.keys()]) closeSharedVoicePeer(clientId);
+    updateSharedVoiceUi();
+    return;
+  }
+  const voiceParticipantIds = new Set((sharedSession?.participants || [])
+    .filter((participant) => participant.id !== sharedClientId && participant.voiceEnabled)
+    .map((participant) => participant.id));
+  for (const clientId of [...sharedVoicePeers.keys()]) {
+    if (!voiceParticipantIds.has(clientId)) closeSharedVoicePeer(clientId);
+  }
+  for (const clientId of voiceParticipantIds) {
+    const peer = ensureSharedVoicePeer(clientId);
+    if (sharedClientId.localeCompare(clientId) < 0 && !peer.offerStarted && peer.connection.signalingState === "stable") {
+      initiateSharedVoiceOffer(clientId);
+    }
+  }
+  updateSharedVoiceUi();
+}
+
+function ensureSharedVoicePeer(clientId) {
+  const existing = sharedVoicePeers.get(clientId);
+  if (existing) return existing;
+
+  const connection = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.cloudflare.com:3478" },
+      { urls: "stun:stun.l.google.com:19302" },
+    ],
+  });
+  const audio = document.createElement("audio");
+  audio.className = "shared-voice-audio";
+  audio.autoplay = true;
+  audio.playsInline = true;
+  audio.dataset.clientId = clientId;
+  document.body.append(audio);
+  const peer = {
+    connection,
+    audio,
+    pendingCandidates: [],
+    makingOffer: false,
+    offerStarted: false,
+    disconnectTimer: null,
+    closed: false,
+  };
+  sharedVoicePeers.set(clientId, peer);
+  for (const track of sharedVoiceStream?.getAudioTracks?.() || []) connection.addTrack(track, sharedVoiceStream);
+
+  connection.addEventListener("icecandidate", (event) => {
+    if (peer.closed || !event.candidate || sharedVoiceState !== "active") return;
+    postSharedEvent("rtc-signal", {
+      target: clientId,
+      candidate: event.candidate.toJSON?.() || event.candidate,
+    });
+  });
+  connection.addEventListener("track", (event) => {
+    if (peer.closed) return;
+    audio.srcObject = event.streams[0] || new MediaStream([event.track]);
+    audio.play().catch(() => {});
+  });
+  connection.addEventListener("connectionstatechange", () => {
+    if (peer.closed) return;
+    clearTimeout(peer.disconnectTimer);
+    peer.disconnectTimer = null;
+    updateSharedVoiceUi();
+    if (connection.connectionState === "failed") retrySharedVoicePeer(clientId);
+    else if (connection.connectionState === "disconnected") {
+      peer.disconnectTimer = setTimeout(() => {
+        if (connection.connectionState === "disconnected") retrySharedVoicePeer(clientId);
+      }, 2500);
+    }
+  });
+  return peer;
+}
+
+async function initiateSharedVoiceOffer(clientId) {
+  const peer = ensureSharedVoicePeer(clientId);
+  if (peer.makingOffer || peer.offerStarted || peer.connection.signalingState !== "stable") return;
+  peer.makingOffer = true;
+  peer.offerStarted = true;
+  try {
+    await peer.connection.setLocalDescription(await peer.connection.createOffer());
+    await postSharedEvent("rtc-signal", {
+      target: clientId,
+      description: peer.connection.localDescription,
+    });
+  } catch (error) {
+    peer.offerStarted = false;
+    console.warn("Unable to create shared voice offer", error);
+  } finally {
+    peer.makingOffer = false;
+  }
+}
+
+async function handleSharedRtcSignal(sender, payload) {
+  if (sharedVoiceState !== "active" || !sharedVoiceStream) return;
+  const participant = sharedSession?.participants?.find((item) => item.id === sender);
+  if (!participant?.voiceEnabled) return;
+  const peer = ensureSharedVoicePeer(sender);
+  const { connection } = peer;
+
+  if (payload.description) {
+    const offerCollision = payload.description.type === "offer" && (peer.makingOffer || connection.signalingState !== "stable");
+    const polite = sharedClientId.localeCompare(sender) > 0;
+    if (offerCollision && !polite) return;
+    if (offerCollision) await connection.setLocalDescription({ type: "rollback" });
+    await connection.setRemoteDescription(payload.description);
+    for (const candidate of peer.pendingCandidates.splice(0)) await connection.addIceCandidate(candidate);
+    if (payload.description.type === "offer") {
+      await connection.setLocalDescription(await connection.createAnswer());
+      await postSharedEvent("rtc-signal", {
+        target: sender,
+        description: connection.localDescription,
+      });
+    }
+    return;
+  }
+
+  if (payload.candidate) {
+    if (connection.remoteDescription) await connection.addIceCandidate(payload.candidate);
+    else peer.pendingCandidates.push(payload.candidate);
+  }
+}
+
+function retrySharedVoicePeer(clientId) {
+  if (!sharedVoicePeers.has(clientId)) return;
+  closeSharedVoicePeer(clientId);
+  if (sharedVoiceState !== "active" || sharedClientId.localeCompare(clientId) >= 0) return;
+  setTimeout(() => {
+    const participant = sharedSession?.participants?.find((item) => item.id === clientId);
+    if (sharedVoiceState === "active" && participant?.voiceEnabled) initiateSharedVoiceOffer(clientId);
+  }, 900);
+}
+
+function closeSharedVoicePeer(clientId) {
+  const peer = sharedVoicePeers.get(clientId);
+  if (!peer) return;
+  clearTimeout(peer.disconnectTimer);
+  peer.closed = true;
+  peer.connection.onicecandidate = null;
+  peer.connection.ontrack = null;
+  peer.connection.onconnectionstatechange = null;
+  peer.connection.close();
+  peer.audio.srcObject = null;
+  peer.audio.remove();
+  sharedVoicePeers.delete(clientId);
+  updateSharedVoiceUi();
 }
 
 function broadcastSharedCursor(event) {
@@ -7183,18 +7450,33 @@ function ensureSharedLiveBadge() {
   if (badge) return badge;
   badge = document.createElement("div");
   badge.className = "share-live-badge";
-  badge.tabIndex = 0;
-  badge.setAttribute("role", "status");
+  badge.setAttribute("role", "group");
   badge.innerHTML = [
     '<span class="share-live-dot" aria-hidden="true"></span>',
     '<span class="share-live-label"></span>',
     '<span class="share-live-count"></span>',
+    '<button class="share-voice-toggle" type="button"></button>',
     '<section class="share-participant-popover">',
-    '  <div class="share-participant-title"></div>',
+    '  <div class="share-participant-header">',
+    '    <div class="share-participant-title"></div>',
+    '    <div class="share-project-meta"></div>',
+    '    <div class="share-voice-status" aria-live="polite"></div>',
+    '  </div>',
     '  <div class="share-participant-list"></div>',
     '</section>',
   ].join("");
-  document.body.append(badge);
+  badge.querySelector(".share-voice-toggle").addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleSharedVoice();
+    event.currentTarget.blur();
+  });
+  const anchor = document.querySelector(".document-title");
+  if (anchor) {
+    anchor.classList.add("share-active");
+    anchor.append(badge);
+  } else {
+    document.body.append(badge);
+  }
   return badge;
 }
 
@@ -7206,7 +7488,11 @@ function updateSharedLiveBadge(status) {
   const count = sharedSession?.participants?.length || 1;
   badge.querySelector(".share-live-count").textContent = t("shareParticipants", { count });
   badge.querySelector(".share-participant-title").textContent = t("shareParticipantsTitle");
+  const projectName = sharedSession?.file?.name || sharedSession?.title || statusFileName?.textContent || t("appTitle");
+  const projectSize = Number(sharedSession?.projectSize || sharedSession?.file?.size || 0);
+  badge.querySelector(".share-project-meta").textContent = `${projectName} · ${t("shareProjectSize", { size: projectSize ? formatBytes(projectSize) : "—" })}`;
   badge.setAttribute("aria-label", `${t(labels[status] || "shareOnline")}，${t("shareParticipants", { count })}`);
+  updateSharedVoiceUi();
   renderSharedParticipantList();
 }
 
@@ -7217,6 +7503,7 @@ function renderSharedParticipantList() {
     role: sharedSession.role,
     name: getSharedRoleName(sharedSession.role),
     ip: "—",
+    voiceEnabled: sharedVoiceState === "active",
     connectedAt: Date.now(),
   }] : [];
   const participants = [...(sharedSession?.participants?.length ? sharedSession.participants : fallbackParticipant)].sort((a, b) => {
@@ -7227,6 +7514,7 @@ function renderSharedParticipantList() {
   for (const participant of participants) {
     const row = document.createElement("div");
     row.className = "share-participant-row";
+    row.classList.toggle("voice-active", participant.voiceEnabled === true);
 
     const avatar = document.createElement("span");
     avatar.className = "share-participant-avatar";
@@ -7241,7 +7529,9 @@ function renderSharedParticipantList() {
     name.textContent = displayName;
     const meta = document.createElement("span");
     meta.className = "share-participant-meta";
-    meta.textContent = `${getSharedRoleName(participant.role)} · ${t("shareParticipantIp", { ip: participant.ip || "—" })}`;
+    const metaParts = [getSharedRoleName(participant.role), t("shareParticipantIp", { ip: participant.ip || "—" })];
+    if (participant.voiceEnabled) metaParts.push(t("shareVoiceActive"));
+    meta.textContent = metaParts.join(" · ");
     details.append(name, meta);
 
     const side = document.createElement("div");

@@ -74,11 +74,13 @@ test("share sessions upload, stream state, and delete expired files", { timeout:
     const reader = stream.body.getReader();
     const snapshot = await readSseEvent(reader);
     assert.equal(snapshot.type, "snapshot");
+    assert.equal(snapshot.session.projectSize, uploadBytes.length);
     assert.deepEqual(snapshot.participants[0], {
       id: "client-alpha",
       role: "host",
       name: "设计师",
       ip: "203.0.113.9",
+      voiceEnabled: false,
       connectedAt: snapshot.participants[0].connectedAt,
     });
     const profileResponse = await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
@@ -89,6 +91,47 @@ test("share sessions upload, stream state, and delete expired files", { timeout:
     assert.equal(profileResponse.name, "小王");
     const renamedPresence = await readSseEvent(reader, "presence", (event) => event.participants[0]?.name === "小王");
     assert.equal(renamedPresence.participants[0].name, "小王");
+
+    const guestAbort = new AbortController();
+    const guestStream = await fetch(`${origin}/api/share-sessions/${first.id}/events?clientId=client-beta&role=guest&name=Reviewer`, {
+      headers: { "X-Real-IP": "198.51.100.7" },
+      signal: guestAbort.signal,
+    });
+    assert.equal(guestStream.status, 200);
+    const guestReader = guestStream.body.getReader();
+    const guestSnapshot = await readSseEvent(guestReader);
+    assert.equal(guestSnapshot.participants.length, 2);
+    assert.equal(guestSnapshot.participants.find((participant) => participant.id === "client-beta").ip, "198.51.100.7");
+
+    const hostVoiceState = await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
+      type: "voice-state",
+      sender: "client-alpha",
+      payload: { enabled: true },
+    }, 202);
+    assert.equal(hostVoiceState.voiceEnabled, true);
+    const hostVoicePresence = await readSseEvent(guestReader, "presence", (event) => event.participants.some((participant) => participant.id === "client-alpha" && participant.voiceEnabled));
+    assert.equal(hostVoicePresence.participants.find((participant) => participant.id === "client-alpha").voiceEnabled, true);
+
+    const guestVoiceState = await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
+      type: "voice-state",
+      sender: "client-beta",
+      payload: { enabled: true },
+    }, 202);
+    assert.equal(guestVoiceState.voiceEnabled, true);
+    await readSseEvent(guestReader, "presence", (event) => event.participants.every((participant) => participant.voiceEnabled));
+
+    await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
+      type: "rtc-signal",
+      sender: "client-alpha",
+      payload: {
+        target: "client-beta",
+        description: { type: "offer", sdp: "v=0\r\ns=PointKing voice test\r\n" },
+      },
+    }, 202);
+    const rtcSignal = await readSseEvent(guestReader, "rtc-signal");
+    assert.equal(rtcSignal.sender, "client-alpha");
+    assert.equal(rtcSignal.payload.description.type, "offer");
+    assert.match(rtcSignal.payload.description.sdp, /PointKing voice test/);
 
     const eventResponse = await postJson(`${origin}/api/share-sessions/${first.id}/events`, {
       type: "annotations",
@@ -102,6 +145,7 @@ test("share sessions upload, stream state, and delete expired files", { timeout:
     const event = await readSseEvent(reader, "annotations");
     assert.equal(event.payload.annotations[0].text, "Synced");
     assert.deepEqual(event.payload.deletedPageIds, ["4"]);
+    guestAbort.abort();
     abort.abort();
 
     await delay(180);
